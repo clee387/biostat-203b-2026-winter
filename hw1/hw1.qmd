@@ -16,6 +16,7 @@ format:
 ---
 
 Display machine information for reproducibility:
+
 ```{r}
 #| eval: true
 sessionInfo()
@@ -51,9 +52,18 @@ Refer to the documentation <https://physionet.org/content/mimiciv/3.1/> for deta
 
   Use Bash commands to answer following questions.
 
+
 2. Display the contents in the folders `hosp` and `icu` using Bash command `ls -l`. Why are these data files distributed as `.csv.gz` files instead of `.csv` (comma separated values) files? Read the page <https://mimic.mit.edu/docs/iv/> to understand what's in each folder.
+```{bash}
+#| eval: true 
+ls -l ~/mimic/hosp
+ls -l ~/mimic/icu
 
 3. Briefly describe what Bash commands `zcat`, `zless`, `zmore`, and `zgrep` do.
+- zcat: prints the first lines of a csv to the terminal
+- zless: opens the file page by page
+- zmore: even more simple than zless, shows one by one the file
+- zgrep: allows you to print all lines in file containg a word/phrase
 
 4. (Looping in Bash) What's the output of the following bash script?
 ```{bash}
