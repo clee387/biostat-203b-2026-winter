@@ -2531,9 +2531,9 @@ user    0m0.001s
 sys 0m0.002s
  158374765 /Users/charlottelee/Downloads/mimic-iv-3.1/hosp/labevents.csv
 
-real    0m19.275s
-user    0m16.316s
-sys 0m2.281s</code></pre>
+real    0m18.866s
+user    0m16.260s
+sys 0m2.214s</code></pre>
 </div>
 </div>
 </section>
@@ -2589,9 +2589,17 @@ sys 0m2.281s</code></pre>
 </div>
 <p>Using <code>chmod</code> to make the file executable by the owner, and run</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./middle.sh</span> pg42671.txt 20 5</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> ~/Documents/biostat-20b-2026-winter/hw1</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> u+x middle.sh</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-l</span> middle.sh</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./middle.sh</span> pg42671.txt 20 5</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p>Explain the output. Explain the meaning of <code>&quot;$1&quot;</code>, <code>&quot;$2&quot;</code>, and <code>&quot;$3&quot;</code> in this shell script. Why do we need the first line of the shell script?</p>
+<ul>
+<li>The output represents lines 16-20 of the pg.42671.txt file. It selects the first 20 lines as a set and then clips the last 5 lines of that subset.</li>
+<li>The $1 represents the file name (pg.42671.txt). The $2 represents the value of the line number we want up to so that would be 20 in this case. Then the $3 represents the number of lines from the bottom of the subset we want to keep (5 lines).</li>
+<li>The first line #!/bin/sh represents the operating system that is needed to run the script. It uses the standard shell interpreter (sh) to make sure that it can execute ./middle.sh.</li>
+</ul>
 </section>
 <section id="q5.-more-fun-with-linux" class="level2">
 <h2 class="anchored" data-anchor-id="q5.-more-fun-with-linux">Q5. More fun with Linux</h2>

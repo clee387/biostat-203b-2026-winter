@@ -283,8 +283,10 @@ done
 ```
 
 2.  What's the difference between the following two commands?
-- The following command overwrites the previous file with new content as new file test1.txt with "hello, world"
-- It will overwrite the file if one previously exists
+
+-   The following command overwrites the previous file with new content
+    as new file test1.txt with "hello, world"
+-   It will overwrite the file if one previously exists
 
 ```{bash}
 #| eval: false
@@ -293,8 +295,11 @@ echo 'hello, world' > test1.txt
 
 and
 
-- The following file appends/adds a new file test2.txt if it doesn't exist
-- If it already exists, it adds the line to the end without deleting the previous content 
+-   The following file appends/adds a new file test2.txt if it doesn't
+    exist
+-   If it already exists, it adds the line to the end without deleting
+    the previous content
+
 ```{bash}
 #| eval: false
 echo 'hello, world' >> test2.txt
@@ -314,11 +319,25 @@ Using `chmod` to make the file executable by the owner, and run
 
 ```{bash}
 #| eval: false
+cd ~/Documents/biostat-20b-2026-winter/hw1
+chmod u+x middle.sh
+ls -l middle.sh
 ./middle.sh pg42671.txt 20 5
 ```
 
 Explain the output. Explain the meaning of `"$1"`, `"$2"`, and `"$3"` in
 this shell script. Why do we need the first line of the shell script?
+
+-   The output represents lines 16-20 of the pg.42671.txt file. It
+    selects the first 20 lines as a set and then clips the last 5 lines
+    of that subset.
+-   The \$1 represents the file name (pg.42671.txt). The \$2 represents
+    the value of the line number we want up to so that would be 20 in
+    this case. Then the \$3 represents the number of lines from the
+    bottom of the subset we want to keep (5 lines).
+-   The first line #!/bin/sh represents the operating system that is
+    needed to run the script. It uses the standard shell interpreter
+    (sh) to make sure that it can execute ./middle.sh.
 
 ## Q5. More fun with Linux
 
