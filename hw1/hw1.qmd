@@ -347,6 +347,56 @@ Try following commands in Bash and interpret the results: `cal`,
 `last | head`, `echo {con,pre}{sent,fer}{s,ed}`, `time sleep 5`,
 `history | tail`.
 
+```{bash}
+#| eval: false
+
+#This gives a month calender highlighting the specific day of the month
+cal
+
+#This gives a full year calender highlighting the specific day of the month & year
+cal 2026
+
+#This gives the month calender of September 1752.(It skips days 3-13.)
+cal 9 1752
+
+#Outputs my mac book name/model
+hostname
+
+#Outputs the code name
+arch
+
+#Outputs the model, year, more specifc details of my specific macbook version and usage history
+uname -a
+
+#Ouputs the currentime in 24-hr format, system run time, number of users, and load averages
+uptime
+
+#Outputs my name/username and the date/time of day
+who am i
+
+#Outputs my username, type of terminal, and login time
+who
+
+#My system overview: current time, system uptime, users, load averages, username, type of terminal,ip address, time of user login, how long user has been idle, the program in use
+w
+
+#Provides a detailed personal information of my ID's including username, userID, groupID, and roup memberships (if available)
+id
+
+#Shows login history of user on system as well as reboots/terminal activities & shows the first 10 lines of output from the last command used
+last | head
+
+#Generates strings that are possible from the combinarions of taking one choice from each set of brackets
+echo {con,pre}{sent,fer}{s,ed}
+
+#Measures how long it takes for sleep command to run (pausing execution for 5 seconds)
+time sleep 5
+
+#Displays the last 10 commands used from my shell command history 
+history | tail
+
+```
+
 ## Q6. Book
 
 1.  Git clone the repository
