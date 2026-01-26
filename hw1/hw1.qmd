@@ -430,7 +430,6 @@ here.
 
 ![](section4.1.5.png)
 
-
 ## Q7. AI assistant
 
 Which AI assistants (e.g., GitHub Copilot) do you use when working on
@@ -440,3 +439,26 @@ help improve your productivity?
 
 Give 5 instances where AI model gave incorrect or misleading answers.
 You can use screenshots or copy-paste the Q&A.
+
+-   I used GitHub Copilot and GPT-5. I treied to use Claude Sonnet but
+    it was quite slow for me so I switched back to GPT.
+
+-   I used them when I had errors in my bash command code lines like
+    when I got a warning or a red message specifically in question 3
+    where I had the most trouble:
+
+-   For screenshot 1 the zcat command would not work for me but it kept
+    on suggesting it and the path assumed it was just mimic
+
+-   For the second screenshot 2, the find function wasn't allowed for
+    this folder and said that the permission was not allowed but GPT
+    kept telling me to use the find command
+
+-   For screenshot 3 (and 2) it assumed that mimic was in the Documents
+    folder even though it was in my downloads folder
+
+![](screenshot1.png)
+
+![](screenshot2.png)
+
+![](screenshot3.png)
