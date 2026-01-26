@@ -203,6 +203,19 @@ gunzip -c ~/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz | tail -n +2 | awk -F,
     
 ```{bash}
 #| eval: true
+#| warning: false
+#| message: false
+
+#see rows/headers
+gunzip -c ~/Downloads/mimic-iv-3.1/icu/icustays.csv.gz | head -n 5
+
+# 94458 ICU stays identified by stay_id
+gunzip -c ~/Downloads/mimic-iv-3.1/icu/icustays.csv.gz | tail -n +2 | wc -l
+
+# 65366 unique subject_ids
+gunzip -c ~/Downloads/mimic-iv-3.1/icu/icustays.csv.gz | tail -n +2 | cut -d, -f1 | sort | uniq | wc -l
+
+
 
 ```
 
@@ -214,8 +227,24 @@ gunzip -c ~/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz | tail -n +2 | awk -F,
     speed for big data files. (Hint:
     `gzip -dk < FILENAME.gz > ./FILENAME`. Remember to delete the large
     `labevents.csv` file after the exercise.)
+    
 ```{bash}
 #| eval: true
+
+#compressed size is 2.4 G
+ls -lh ~/Downloads/mimic-iv-3.1/hosp/labevents.csv.gz
+
+#non-compressed size is 17 G (more than 7 timers larger than compressed file size)
+ls -lh ~/Downloads/mimic-iv-3.1/hosp/labevents.csv
+
+
+#comparing run times: the non-compressed takes 16+ seconds compared to the compresssed file
+#compressed
+time zcat ~/Downloads/mimic-iv-3.1/hosp/labevents.csv.gz 2>/dev/null | wc -l
+
+#noncompresssed: 
+time wc -l ~/Downloads/mimic-iv-3.1/hosp/labevents.csv
+
 
 ```
 
