@@ -405,6 +405,14 @@ history | tail
     **not** put this repository within your homework repository
     `biostat-203b-2026-winter`.
 
+```{bash}
+#| eval: false
+cd ~/Downloads/winter2026_data
+git clone https://github.com/christophergandrud/Rep-Res-Book.git
+ls ~/Downloads/winter2026_data/Rep-Res-Book
+
+```
+
 2.  Open the project by clicking `rep-res-3rd-edition.Rproj` and compile
     the book by clicking `Build Book` in the `Build` panel of RStudio.
     (Hint: I was able to build `git_book` and `epub_book` directly. For
@@ -419,6 +427,9 @@ TexLive packages.
 
 For grading purpose, include a screenshot of Section 4.1.5 of the book
 here.
+
+![](section4.1.5.png)
+
 
 ## Q7. AI assistant
 
