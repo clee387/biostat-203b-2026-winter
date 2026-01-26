@@ -118,7 +118,7 @@ ls -l ~/mimic/icu
 4.  (Looping in Bash) What's the output of the following bash script?
 
 ```{bash}
-#| eval: false
+#| eval: true
 for datafile in ~/mimic/hosp/{a,l,pa}*.gz
 do
   ls -l $datafile
@@ -138,7 +138,7 @@ charlottelee staff 2835586 Apr 12 2024
 (Hint: combine linux commands `zcat <` and `wc -l`.)
 
 ```{bash}
-#| eval: false
+#| eval: true
 for datafile in ~/mimic/hosp/*.gz
 do 
   echo "$datafile: $(zcat < "$datafile" | wc -l) lines"
@@ -273,7 +273,7 @@ of times each of the four characters is mentioned using Linux commands.
     -   had to install Homebrew & then wget command
 
 ```{bash}
-#| eval: false
+#| eval: true
 wget -nc http://www.gutenberg.org/cache/epub/42671/pg42671.txt
 for char in Elizabeth Jane Lydia Darcy
 do
@@ -318,7 +318,7 @@ head -n "$2" "$1" | tail -n "$3"
 Using `chmod` to make the file executable by the owner, and run
 
 ```{bash}
-#| eval: false
+#| eval: true
 cd ~/Documents/biostat-20b-2026-winter/hw1
 chmod u+x middle.sh
 ls -l middle.sh
@@ -348,7 +348,7 @@ Try following commands in Bash and interpret the results: `cal`,
 `history | tail`.
 
 ```{bash}
-#| eval: false
+#| eval: true
 
 #This gives a month calender highlighting the specific day of the month
 cal
