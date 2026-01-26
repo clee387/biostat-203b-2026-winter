@@ -176,7 +176,7 @@ gunzip -c ~/Downloads/mimic-iv-3.1/hosp/patients.csv.gz | tail -n +2 | cut -d, -
     variables in decreasing order. (Hint: combine Linux commands `zcat`,
     `head`/`tail`, `awk`, `uniq -c`, `wc`, `sort`, and so on; skip the
     header line.)
-    
+
 ```{bash}
 #| eval: true
 
@@ -195,12 +195,11 @@ gunzip -c ~/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz | tail -n +2 | awk -F,
 
 ```
 
-
 7.  The `icusays.csv.gz` file contains all the ICU stays during the
     study period. How many ICU stays, identified by `stay_id`, are in
     this data file? How many unique patients, identified by
     `subject_id`, are in this data file?
-    
+
 ```{bash}
 #| eval: true
 #| warning: false
@@ -227,7 +226,7 @@ gunzip -c ~/Downloads/mimic-iv-3.1/icu/icustays.csv.gz | tail -n +2 | cut -d, -f
     speed for big data files. (Hint:
     `gzip -dk < FILENAME.gz > ./FILENAME`. Remember to delete the large
     `labevents.csv` file after the exercise.)
-    
+
 ```{bash}
 #| eval: true
 
@@ -267,17 +266,25 @@ Explain what `wget -nc` does. Do **not** put this text file
 `pg42671.txt` in Git. Complete the following loop to tabulate the number
 of times each of the four characters is mentioned using Linux commands.
 
+-   wget: is a command which allows for downloading files directly from
+    the internet to your working directory & then saves it with the same
+    name as teh specific online server
+
+    -   had to install Homebrew & then wget command
+
 ```{bash}
 #| eval: false
 wget -nc http://www.gutenberg.org/cache/epub/42671/pg42671.txt
 for char in Elizabeth Jane Lydia Darcy
 do
-  echo $char:
-  # some bash commands here
+  echo "$char:"
+  grep -o -i "$char" pg42671.txt | wc -l  # some bash commands here
 done
 ```
 
 2.  What's the difference between the following two commands?
+- The following command overwrites the previous file with new content as new file test1.txt with "hello, world"
+- It will overwrite the file if one previously exists
 
 ```{bash}
 #| eval: false
@@ -286,6 +293,8 @@ echo 'hello, world' > test1.txt
 
 and
 
+- The following file appends/adds a new file test2.txt if it doesn't exist
+- If it already exists, it adds the line to the end without deleting the previous content 
 ```{bash}
 #| eval: false
 echo 'hello, world' >> test2.txt
