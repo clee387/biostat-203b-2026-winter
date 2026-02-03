@@ -1,6 +1,6 @@
 *LEE, CHARLOTTE (clee387)*
 
-### Overall Grade: 85/140
+### Overall Grade: 86/140
 
 ---
 
@@ -14,7 +14,7 @@
 
 ---
 
-### Completeness, correctness and efficiency of solution: 58/90
+### Completeness, correctness and efficiency of solution: 59/90
 
 **Q1 (10/10)**
 
@@ -64,7 +64,7 @@
 
 - Screenshot shows correct section "4.1.5 Spaces in directory and file names".
 
-**Q7 (5/10)**
+**Q7 (6/10)**
 
 - Which AI assistant: GitHub Copilot, GPT-5 (1/1)
 
@@ -74,7 +74,7 @@
 
 - Do you think they help improve productivity: Not explicitly answered (0/2)
 
-- **-2 points**: Only 3 instances of AI errors provided (screenshot1, screenshot2, screenshot3). Missing 2 instances.
+- 3 instances of AI errors provided (3/5).
 
 ---
 
@@ -109,7 +109,5 @@
 ---
 
 ### Additional Notes
-
-- You used decompressed CSV files in Q3.5 which is against the instructions. However, Q3.6-Q3.8 uses `gunzip -c` which streams without creating files, so only Q3.5 is problematic.
 
 - The AI error screenshots provided show ChatGPT giving incorrect path suggestions and command recommendations.
