@@ -102,6 +102,7 @@ system.time(read_csv((text_file), show_col_types = FALSE))
 system.time(fread((text_file)))
 
 
+file <-"/Users/charlottelee/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz"
 # Comparing class types
 time_base <- system.time({
   admissions_base <- read.csv(file)
