@@ -1,7 +1,7 @@
 ---
 title: "Biostat 203B Homework 2"
 subtitle: Due ~~Feb 8~~ Feb 11, 2026 @ 11:59PM
-author: "Your Name and UID"
+author: "Charlotte Lee and 206782165"
 format:
   html:
     theme: cosmo
@@ -16,23 +16,32 @@ format:
 ---
 
 Display machine information for reproducibility:
+
 ```{r}
 sessionInfo()
 ```
 
 Load necessary libraries (you can add more as needed).
+
 ```{r setup}
+#| message: false
+#| warning: false
 library(arrow)
 library(data.table)
 library(duckdb)
 library(memuse)
-library(pryr)
+#library(pryr) didn't work for my version of R
+library(lobstr)
 library(R.utils)
 library(tidyverse)
+
+
 ```
 
 Display memory information of your computer
+
 ```{r}
+#| eval: true
 memuse::Sys.meminfo()
 ```
 
@@ -41,10 +50,12 @@ In this exercise, we explore various tools for ingesting the [MIMIC-IV](https://
 Display the contents of MIMIC `hosp` and `icu` data folders:
 
 ```{bash}
+#| eval: true
 ls -l ~/mimic/hosp/
 ```
 
 ```{bash}
+#| eval: true
 ls -l ~/mimic/icu/
 ```
 
@@ -54,46 +65,210 @@ ls -l ~/mimic/icu/
 
 There are quite a few utilities in R for reading plain text data files. Let us test the speed of reading a moderate sized compressed csv file, `admissions.csv.gz`, by three functions: `read.csv` in base R, `read_csv` in tidyverse, and `fread` in the data.table package.
 
-Which function is fastest? Is there difference in the (default) parsed data types? How much memory does each resultant dataframe or tibble use? (Hint: `system.time` measures run times; `pryr::object_size` measures memory usage; all these readers can take gz file as input without explicit decompression.) 
+Which function is fastest? Is there difference in the (default) parsed data types? How much memory does each resultant dataframe or tibble use? (Hint: `system.time` measures run times; `pryr::object_size` measures memory usage; all these readers can take gz file as input without explicit decompression.)
+
+-   Elapsed time: total wall-clock time
+
+    -   The fastest function was the fread() function with a speed of 0.302s compared to the 0.510s (read_csv) and 4.394s (read.csv).
+
+-   Default parsed types:
+
+    -   Yes, there is a differnce in parsed type because read.csv() makes a data.frame and often converts text columns to factors, while read_csv() makes a tibble with text columns as characters.
+
+-   The amount of memory each resultant uses:
+
+```         
+-   read.csv: 200.10 MB
+
+-   read_csv: 70.02 MB
+
+-   fread: 63.47 MB
+```
+
+-   Overall: **fread:** `fread()` seems to make a data.table with text columns as characters and is faster and more memory-efficient.
+
+```{r}
+#| eval: true
+text_file <-"/Users/charlottelee/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz"
+
+# Comparing Function Speed
+#read.csv
+system.time(read.csv(text_file))
+
+#read_csv
+system.time(read_csv((text_file), show_col_types = FALSE))
+
+#fread
+system.time(fread((text_file)))
+
+
+# Comparing class types
+time_base <- system.time({
+  admissions_base <- read.csv(file)
+})
+
+# 2. Tidyverse / readr
+time_tidy <- system.time({
+  admissions_tidy <- read_csv(file, show_col_types = FALSE)
+})
+
+# 3. data.table / fread
+time_dt <- system.time({
+  admissions_dt <- fread(file)
+})
+
+  # read.csv → data.frame
+class(admissions_base)   
+  # read_csv → tibble
+class(admissions_tidy)  
+  # fread → data.table
+class(admissions_dt)     
+
+# Comparing Sizes
+#read.csv
+lobstr::obj_size(admissions_base)
+#read_csv
+lobstr::obj_size(admissions_tidy)
+#fread
+lobstr::obj_size(admissions_dt)
+
+
+```
 
 ### Q1.2 User-supplied data types
 
 Re-ingest `admissions.csv.gz` by indicating appropriate column data types in `read_csv`. Does the run time change? How much memory does the result tibble use? (Hint: `col_types` argument in `read_csv`; result tibble should be less than 50MB.)
 
+-   The run time changed from 0.510s previously to around 0.533s which is evidently slightly slower than before.
+
+-   The resulting tibble is 70.02 MB which is larger than what the answer says it should be but this makes sense because the full MIMIC admissions file is big and we're parsing through it with each data type.
+
+```{r}
+file <-"/Users/charlottelee/Downloads/mimic-iv-3.1/hosp/admissions.csv.gz"
+
+# Preview first 100 rows to infer types
+#admissions_preview <- read_csv(file, n_max = 100)
+#glimpse(admissions_preview)
+
+# Define column types based on your glimpse
+col_types <- cols(
+  subject_id           = col_double(),
+  hadm_id              = col_double(),
+  admittime            = col_datetime(),
+  dischtime            = col_datetime(),
+  deathtime            = col_datetime(),
+  admission_type       = col_character(),
+  admit_provider_id    = col_character(),
+  admission_location   = col_character(),
+  discharge_location   = col_character(),
+  insurance            = col_character(),
+  language             = col_character(),
+  marital_status       = col_character(),
+  race                 = col_character(),
+  edregtime            = col_datetime(),
+  edouttime            = col_datetime(),
+  hospital_expire_flag = col_double()
+)
+
+# Re-ingest with explicit types and measure runtime
+time_typed <- system.time({
+  admissions_typed <- read_csv(file, col_types = col_types)
+})
+
+time_typed
+
+#Check memory usage
+lobstr::obj_size(admissions_typed)
+
+
+```
+
 ## Q2. Ingest big data files
 
 <p align="center">
-  <img src="./bigfile.png" width="50%">
+
+![](images/clipboard-2090342490.png)
+
+<img src="./bigfile.png" width="50%"/>
+
 </p>
 
 Let us focus on a bigger file, `labevents.csv.gz`, which is about 130x bigger than `admissions.csv.gz`.
+
 ```{bash}
 ls -l ~/mimic/hosp/labevents.csv.gz
 ```
+
 Display the first 10 lines of this file.
+
 ```{bash}
+#| eval: false
 zcat < ~/mimic/hosp/labevents.csv.gz | head -10
 ```
 
 ### Q2.1 Ingest `labevents.csv.gz` by `read_csv`
 
 <p align="center">
-  <img src="./readr_logo.png" width="20%">
+
+![](images/clipboard-2264191617.png)
+
+<img src="./readr_logo.png" width="20%"/>
+
 </p>
 
-Try to ingest `labevents.csv.gz` using `read_csv`. What happens? If it takes more than 3 minutes on your computer, then abort the program and report your findings. 
+Try to ingest `labevents.csv.gz` using `read_csv`. What happens? If it takes more than 3 minutes on your computer, then abort the program and report your findings.
+
+-   Running the following code chunk using read_csv takes more than 3 minutes. The word "working" keeps popping up at the top of my screen and then R terminated.
+-   I believe this is because the file is so large that read_csv will take too long to parse through.
+
+```{r}
+#| eval: false
+
+file <-"/Users/charlottelee/Downloads/mimic-iv-3.1/hosp/labevents.csv.gz" 
+time_labevents <- system.time({
+  labevents <- read_csv(file)
+})
+
+```
 
 ### Q2.2 Ingest selected columns of `labevents.csv.gz` by `read_csv`
 
-Try to ingest only columns `subject_id`, `itemid`, `charttime`, and `valuenum` in `labevents.csv.gz` using `read_csv`.  Does this solve the ingestion issue? (Hint: `col_select` argument in `read_csv`.)
+Try to ingest only columns `subject_id`, `itemid`, `charttime`, and `valuenum` in `labevents.csv.gz` using `read_csv`. Does this solve the ingestion issue? (Hint: `col_select` argument in `read_csv`.)
+
+-   This strategy does not seem to solve the ingestion issue as the code junk acted in a similar way. This time, however, a green bar popped up and then a "Timing stopped" also appeared (Timing stopped at: 113.2 157 338.9).
+
+```{r}
+#| eval: false
+file <-"/Users/charlottelee/Downloads/mimic-iv-3.1/hosp/labevents.csv.gz" 
+
+time_labevents <- system.time({
+  labevents_subset <- read_csv(
+    file,
+    col_select = c("subject_id", "itemid", "charttime", "valuenum")
+  )
+})
+
+# Check runtime
+time_labevents
+
+# Check memory usage
+lobstr::obj_size(labevents_subset)
+
+# Check the first few rows
+head(labevents_subset)
+```
 
 ### Q2.3 Ingest a subset of `labevents.csv.gz`
 
 <p align="center">
-  <img src="./linux_logo.png" width="20%">
+
+![](images/clipboard-2344810496.png)
+
+<img src="./linux_logo.png" width="20%"/>
+
 </p>
 
-Our first strategy to handle this big data file is to make a subset of the `labevents` data.  Read the [MIMIC documentation](https://mimic.mit.edu/docs/iv/modules/hosp/labevents/) for the content in data file `labevents.csv`.
+Our first strategy to handle this big data file is to make a subset of the `labevents` data. Read the [MIMIC documentation](https://mimic.mit.edu/docs/iv/modules/hosp/labevents/) for the content in data file `labevents.csv`.
 
 In later exercises, we will only be interested in the following lab items: albumin (50862), creatinine (50912), potassium (50971), sodium (50983), chloride (50902), bicarbonate (50882), hematocrit (51221), white blood cell count (51301), and glucose (50931) and the following columns: `subject_id`, `itemid`, `charttime`, `valuenum`. Write a Bash command to extract these columns and rows from `labevents.csv.gz` and save the result to a new file `labevents_filtered.csv.gz` in the current working directory. (Hint: Use `zcat <` to pipe the output of `labevents.csv.gz` to `awk` and then to `gzip` to compress the output. Do **not** put `labevents_filtered.csv.gz` in Git! To save render time, you can put `#| eval: false` at the beginning of this code chunk. TA will change it to `#| eval: true` before rendering your qmd file.)
 
@@ -102,19 +277,23 @@ Display the first 10 lines of the new file `labevents_filtered.csv.gz`. How many
 ### Q2.4 Ingest `labevents.csv` by Apache Arrow
 
 <p align="center">
-  <img src="./arrow_logo.png" width="30%">
+
+<img src="./arrow_logo.png" width="30%"/>
+
 </p>
 
 Our second strategy is to use [Apache Arrow](https://arrow.apache.org/) for larger-than-memory data analytics. Unfortunately Arrow does not work with gz files directly. First decompress `labevents.csv.gz` to `labevents.csv` and put it in the current working directory (do not add it in Git!). To save render time, put `#| eval: false` at the beginning of this code chunk. TA will change it to `#| eval: true` when rendering your qmd file.
 
 Then use [`arrow::open_dataset`](https://arrow.apache.org/docs/r/reference/open_dataset.html) to ingest `labevents.csv`, select columns, and filter `itemid` as in Q2.3. How long does the ingest+select+filter process take? Display the number of rows and the first 10 rows of the result tibble, and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
-Write a few sentences to explain what Apache Arrow is. Imagine you want to explain it to a layman in an elevator. 
+Write a few sentences to explain what Apache Arrow is. Imagine you want to explain it to a layman in an elevator.
 
 ### Q2.5 Compress `labevents.csv` to Parquet format and ingest/select/filter
 
 <p align="center">
-  <img src="./parquet_logo.png" width="30%">
+
+<img src="./parquet_logo.png" width="30%"/>
+
 </p>
 
 Re-write the csv file `labevents.csv` in the binary Parquet format (Hint: [`arrow::write_dataset`](https://arrow.apache.org/docs/r/reference/write_dataset.html).) How large is the Parquet file(s)? How long does the ingest+select+filter process of the Parquet file(s) take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
@@ -124,7 +303,9 @@ Write a few sentences to explain what the Parquet format is. Imagine you want to
 ### Q2.6 DuckDB
 
 <p align="center">
-  <img src="./duckdb_logo.png" width="20%">
+
+<img src="./duckdb_logo.png" width="20%"/>
+
 </p>
 
 Ingest the Parquet file, convert it to a DuckDB table by [`arrow::to_duckdb`](https://arrow.apache.org/docs/r/reference/to_duckdb.html), select columns, and filter rows as in Q2.5. How long does the ingest+convert+select+filter process take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
@@ -134,24 +315,30 @@ Write a few sentences to explain what DuckDB is. Imagine you want to explain it 
 ## Q3. Ingest and filter `chartevents.csv.gz`
 
 [`chartevents.csv.gz`](https://mimic.mit.edu/docs/iv/modules/icu/chartevents/) contains all the charted data available for a patient. During their ICU stay, the primary repository of a patient’s information is their electronic chart. The `itemid` variable indicates a single measurement type in the database. The `value` variable is the value measured for `itemid`. The first 10 lines of `chartevents.csv.gz` are
+
 ```{bash}
 zcat < ~/mimic/icu/chartevents.csv.gz | head -10
 ```
+
 How many rows? 433 millions.
+
 ```{bash}
 #| eval: false
 zcat < ~/mimic/icu/chartevents.csv.gz | tail -n +2 | wc -l
 ```
+
 [`d_items.csv.gz`](https://mimic.mit.edu/docs/iv/modules/icu/d_items/) is the dictionary for the `itemid` in `chartevents.csv.gz`.
+
 ```{bash}
 zcat < ~/mimic/icu/d_items.csv.gz | head -10
 ```
-In later exercises, we are interested in the vitals for ICU patients: heart rate (220045), mean non-invasive blood pressure (220181), systolic non-invasive blood pressure (220179), body temperature in Fahrenheit (223761), and respiratory rate (220210). Retrieve a subset of `chartevents.csv.gz` only containing these items, using the favorite method you learnt in Q2. 
+
+In later exercises, we are interested in the vitals for ICU patients: heart rate (220045), mean non-invasive blood pressure (220181), systolic non-invasive blood pressure (220179), body temperature in Fahrenheit (223761), and respiratory rate (220210). Retrieve a subset of `chartevents.csv.gz` only containing these items, using the favorite method you learnt in Q2.
 
 Document the steps and show code. Display the number of rows and the first 10 rows of the result tibble.
 
 ## Q4. AI assistant
 
-Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity? 
+Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity?
 
 Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
