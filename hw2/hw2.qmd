@@ -277,8 +277,11 @@ Write a **Bash command** to extract these columns and rows from `labevents.csv.g
 
 Display the first 10 lines of the new file `labevents_filtered.csv.gz`. How many lines are in this new file, excluding the header? How long does it take `read_csv` to ingest `labevents_filtered.csv.gz`?
 
+-   The new file `labevents_filtered.csv.gz` has 33712352 rows.
+
+-   It took 6.471 seconds according to the time check function but it seemed like 3-5 minutes while I was waiting for my code to process.
+
 ```{bash}
-#| eval: false
 #| eval: false
 gzcat ~/mimic/hosp/labevents.csv.gz | \
 awk -F, 'BEGIN {
@@ -300,21 +303,28 @@ NR==1 {
 ```
 
 ```{r}
+#| eval: true
 file <- "labevents_filtered.csv.gz"
 
 
 # Measure runtime
 time_filtered <- system.time({
-  labevents_filtered <- read_csv(file)
+  labevents_filtered <- read_csv(file, show_col_types = FALSE)
 })
 
 time_filtered
 
-# Check memory usage
-lobstr::obj_size(labevents_filtered)
 
-# Preview
-head(labevents_filtered, 10)
+library(dplyr)
+
+# Only show the first 10 rows (like the instructions)
+labevents_filtered %>%
+  arrange(subject_id, charttime, itemid) %>%
+  slice_head(n = 10)
+
+#Check number of rows exclusing header automatically
+nrow(labevents_filtered)
+
 ```
 
 ### Q2.4 Ingest `labevents.csv` by Apache Arrow
@@ -323,13 +333,24 @@ head(labevents_filtered, 10)
 
 <img src="./arrow_logo.png" width="30%"/>
 
-![](images/clipboard-1613587575.png)</p>
+![](images/clipboard-1613587575.png)
+
+</p>
 
 Our second strategy is to use [Apache Arrow](https://arrow.apache.org/) for larger-than-memory data analytics. Unfortunately Arrow does not work with gz files directly. First decompress `labevents.csv.gz` to `labevents.csv` and put it in the current working directory (do not add it in Git!). To save render time, put `#| eval: false` at the beginning of this code chunk. TA will change it to `#| eval: true` when rendering your qmd file.
 
 Then use [`arrow::open_dataset`](https://arrow.apache.org/docs/r/reference/open_dataset.html) to ingest `labevents.csv`, select columns, and filter `itemid` as in Q2.3. How long does the ingest+select+filter process take? Display the number of rows and the first 10 rows of the result tibble, and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what Apache Arrow is. Imagine you want to explain it to a layman in an elevator.
+
+```{bash}
+#| eval: false
+#decompress labevents.csv.gz to labevents.csv
+gunzip -c ~/mimic/hosp/labevents.csv.gz > labevents.csv
+
+
+
+```
 
 ### Q2.5 Compress `labevents.csv` to Parquet format and ingest/select/filter
 
