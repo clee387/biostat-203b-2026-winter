@@ -279,19 +279,29 @@ Display the first 10 lines of the new file `labevents_filtered.csv.gz`. How many
 
 ```{bash}
 #| eval: false
+#| eval: false
+gzcat ~/mimic/hosp/labevents.csv.gz | \
+awk -F, 'BEGIN {
+    # lab items we care about
+    keep[50862]=1; keep[50912]=1; keep[50971]=1; keep[50983]=1;
+    keep[50902]=1; keep[50882]=1; keep[51221]=1; keep[51301]=1; keep[50931]=1
+}
+NR==1 {
+    # Print clean header
+    print "subject_id,itemid,charttime,valuenum"
+    next
+}
+($5 in keep) {
+    # Print only relevant columns
+    print $2","$5","$7","$10
+}' | gzip > labevents_filtered.csv.gz
 
-zcat ~/mimic/hosp/labevents.csv.gz | \ 
-awk -F, 'NR==1 || $2==50862 || $2==50912 || $2==50971 || $2==50983 || $2==50902 || $2==50882 || $2==51221 || $2==51301 || $2==50931 {print $1","$2","$3","$5}' | \
-gzip > labevents_filtered.csv.gz
-
-#zcat labevents_filtered.csv.gz | head -n 10
-
-#zcat labevents_filtered.csv.gz | tail -n +2 | wc -l
 
 ```
 
 ```{r}
 file <- "labevents_filtered.csv.gz"
+
 
 # Measure runtime
 time_filtered <- system.time({
@@ -313,7 +323,7 @@ head(labevents_filtered, 10)
 
 <img src="./arrow_logo.png" width="30%"/>
 
-</p>
+![](images/clipboard-1613587575.png)</p>
 
 Our second strategy is to use [Apache Arrow](https://arrow.apache.org/) for larger-than-memory data analytics. Unfortunately Arrow does not work with gz files directly. First decompress `labevents.csv.gz` to `labevents.csv` and put it in the current working directory (do not add it in Git!). To save render time, put `#| eval: false` at the beginning of this code chunk. TA will change it to `#| eval: true` when rendering your qmd file.
 
