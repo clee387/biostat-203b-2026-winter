@@ -321,7 +321,7 @@ library(dplyr)
 labevents_filtered %>%
   arrange(subject_id, charttime, itemid) %>%
   slice_head(n = 10)
-
+labevents_filtered
 #Check number of rows exclusing header automatically
 nrow(labevents_filtered)
 
@@ -339,17 +339,58 @@ nrow(labevents_filtered)
 
 Our second strategy is to use [Apache Arrow](https://arrow.apache.org/) for larger-than-memory data analytics. Unfortunately Arrow does not work with gz files directly. First decompress `labevents.csv.gz` to `labevents.csv` and put it in the current working directory (do not add it in Git!). To save render time, put `#| eval: false` at the beginning of this code chunk. TA will change it to `#| eval: true` when rendering your qmd file.
 
-Then use [`arrow::open_dataset`](https://arrow.apache.org/docs/r/reference/open_dataset.html) to ingest `labevents.csv`, select columns, and filter `itemid` as in Q2.3. How long does the ingest+select+filter process take? Display the number of rows and the first 10 rows of the result tibble, and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
+Then use [`arrow::open_dataset`](https://arrow.apache.org/docs/r/reference/open_dataset.html) to ingest `labevents.csv`, select columns, and filter `itemid` as in Q2.3.
+
+How long does the ingest+select+filter process take? Display the number of rows and the first 10 rows of the result tibble, and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what Apache Arrow is. Imagine you want to explain it to a layman in an elevator.
 
+-   The ingest+select+filter process took 41.777 seconds.
+
+-   There are 33712352 rows in the dataset.
+
+-   The arrow tibble matches the previous filtered tibble.
+
+-   
+
 ```{bash}
-#| eval: false
-#decompress labevents.csv.gz to labevents.csv
-gunzip -c ~/mimic/hosp/labevents.csv.gz > labevents.csv
+#decompressing
+gunzip -k ~/mimic/hosp/labevents.csv.gz
+
+ls -lh ~/mimic/hosp/labevents.csv
+
+```
+
+```{r}
+#Opens decompressed CSV as an Arrow dataset
+library(arrow)
+ds <- arrow::open_dataset("~/Downloads/mimic-iv-3.1/hosp/labevents.csv", format= "csv")
+
+# Select only the columns we need and filter for specific itemids
+
+# make as a tibble
+labevents_arrow <- ds %>%
+  select(subject_id, itemid, charttime, valuenum) %>%
+  filter(itemid %in% c(50862, 50912, 50971, 50983, 50902, 50882, 51221, 51301, 50931)) %>%
+  collect()  
 
 
+# count rows
+nrow(labevents_arrow) 
 
+#keep display order
+labevents_arrow %>%
+  arrange(subject_id, charttime, itemid) %>%
+  slice_head(n = 10)
+labevents_arrow
+
+#injest time
+system.time({
+  labevents_arrow <- ds %>%
+    select(subject_id, itemid, charttime, valuenum) %>%
+    filter(itemid %in% c(50862, 50912, 50971, 50983, 50902, 50882, 51221, 51301, 50931)) %>%
+    collect()
+})
 ```
 
 ### Q2.5 Compress `labevents.csv` to Parquet format and ingest/select/filter
@@ -358,11 +399,15 @@ gunzip -c ~/mimic/hosp/labevents.csv.gz > labevents.csv
 
 <img src="./parquet_logo.png" width="30%"/>
 
-</p>
+![](images/clipboard-126482051.png)</p>
 
 Re-write the csv file `labevents.csv` in the binary Parquet format (Hint: [`arrow::write_dataset`](https://arrow.apache.org/docs/r/reference/write_dataset.html).) How large is the Parquet file(s)? How long does the ingest+select+filter process of the Parquet file(s) take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what the Parquet format is. Imagine you want to explain it to a layman in an elevator.
+
+```{r}
+
+```
 
 ### Q2.6 DuckDB
 
@@ -375,6 +420,10 @@ Write a few sentences to explain what the Parquet format is. Imagine you want to
 Ingest the Parquet file, convert it to a DuckDB table by [`arrow::to_duckdb`](https://arrow.apache.org/docs/r/reference/to_duckdb.html), select columns, and filter rows as in Q2.5. How long does the ingest+convert+select+filter process take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what DuckDB is. Imagine you want to explain it to a layman in an elevator.
+
+```{r}
+
+```
 
 ## Q3. Ingest and filter `chartevents.csv.gz`
 
