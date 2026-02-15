@@ -1,0 +1,285 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <title>HW2</title>
+  <style type="text/css">
+    html {
+      line-height: 1.5;
+      font-family: Georgia, serif;
+      font-size: 20px;
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 1em;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace;
+      font-size: 85%;
+      margin: 0;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<div id="header">
+<h1 class="title">HW2</h1>
+</div>
+<p><em>Charlotte Lee</em></p>
+<h3 id="overall-grade-109200">Overall Grade: 109/200</h3>
+<h3 id="quality-of-report-810">Quality of report: 8/10</h3>
+<ul>
+<li>Is the homework submitted (git tag time) before deadline?
+<ul>
+<li>3 min late (-2)</li>
+</ul></li>
+<li>Is the final report in a human readable format (html, pdf)?<br />
+</li>
+<li>Is the report prepared as a dynamic document (Quarto) for better
+reproducibility?<br />
+</li>
+<li>Is the report clear (whole sentences, typos, grammar)? Do readers
+have a clear idea what’s going on and how results are produced by just
+reading the report?</li>
+</ul>
+<h3
+id="completeness-correctness-and-efficiency-of-solution-63150">Completeness,
+correctness and efficiency of solution: 63/150</h3>
+<ul>
+<li><p>Q1 (13/20)</p>
+<ul>
+<li>Q1.1 (10/10): All three methods benchmarked with
+<code>system.time</code> and <code>lobstr::obj_size</code>. Identifies
+<code>fread</code> as fastest (0.302s). Discusses parsed type
+differences (data.frame, tibble, data.table). Memory: 200.10, 70.02,
+63.47 MB.</li>
+<li>Q1.2 (3/10): Uses <code>col_double()</code> for subject_id, hadm_id,
+and hospital_expire_flag instead of <code>col_integer()</code>. Uses
+<code>col_character()</code> for all categorical columns instead of
+<code>col_factor()</code>. Reports <strong>70.02 MB</strong> no
+improvement over default <code>read_csv</code>, and well above the
+&lt;50 MB target stated in the hint. (-5 for no
+<code>col_factor()</code>, -2 for <code>col_double()</code> instead of
+<code>col_integer()</code>)</li>
+</ul></li>
+<li><p>Q2 (50/80)</p>
+<ul>
+<li>Q2.1 (10/10): Reports R terminated after 3+ minutes. Adequate
+explanation.</li>
+<li>Q2.2 (10/10): Uses <code>col_select</code> with 4 columns. Reports
+“Timing stopped at: 113.2 157 338.9”. Correctly notes it doesn’t fully
+solve the issue.</li>
+<li>Q2.3 (15/15): Excellent awk with dynamic <code>keep[]</code>
+associative array for item IDs. Filters on <code>$5</code>. Prints
+<code>$2","$5","$7","$10</code>. Hardcoded header output. 33,712,352
+rows reported. First 10 rows displayed with <code>arrange()</code>.
+<code>read_csv</code> timing (6.471s).</li>
+<li>Q2.4 (15/15): Correct decompression via <code>gunzip -k</code>.
+Opens decompressed CSV with <code>arrow::open_dataset()</code>. Reports
+41.777s, 33,712,352 rows. First 10 rows displayed with
+<code>arrange()</code>. Arrow explanation provided.</li>
+<li>Q2.5 (0/15): <strong>Empty code chunk — no Parquet conversion
+attempted.</strong> No file size, no timing, no row count, no
+explanation. (-15)</li>
+<li>Q2.6 (0/15): <strong>Empty code chunk — no DuckDB work
+attempted.</strong> No timing, no row count, no explanation. (-15)</li>
+</ul></li>
+<li><p>Q3 (0/30): <strong>No code or answer provided.</strong> Only the
+question prompt is present. (-30)</p></li>
+<li><p>Q4 (0/20): <strong>No answer provided.</strong> No AI assistant
+description, no 5 instances of incorrect output. (-20)</p></li>
+</ul>
+<h3 id="usage-of-git-1010">Usage of Git: 10/10</h3>
+<ul>
+<li>Are branches (<code>main</code> and <code>develop</code>) correctly
+set up? Is the hw submission put into the <code>main</code>
+branch?<br />
+</li>
+<li>Are there enough commits (&gt;=5) in develop branch? Are commit
+messages clear?<br />
+</li>
+<li>Is the hw2 submission tagged?<br />
+</li>
+<li>Are the folders (<code>hw1</code>, <code>hw2</code>, …) created
+correctly?<br />
+</li>
+<li>Do not put auxiliary and big data files into version control.</li>
+</ul>
+<h3 id="reproducibility-1010">Reproducibility: 10/10</h3>
+<ul>
+<li>Are the materials (files and instructions) submitted to the
+<code>main</code> branch sufficient for reproducing all the
+results?<br />
+</li>
+<li>If necessary, are there clear instructions how to reproduce the
+results?</li>
+</ul>
+<h3 id="r-code-style-1820">R code style: 18/20</h3>
+<ul>
+<li><a
+href="https://style.tidyverse.org/syntax.html#infix-operators">Rule
+2.2.4</a> Place spaces around all infix operators.
+<ul>
+<li><strong>Violation (lines 92, 105, 148, 228, 243):</strong>
+<code>file &lt;-"/Users/..."</code> — missing space after
+<code>&lt;-</code> operator. Also line 367: <code>format= "csv"</code> —
+missing space before <code>=</code>. (-2)</li>
+</ul></li>
+<li><a
+href="https://style.tidyverse.org/syntax.html#long-function-calls">Rule
+2.6</a> The maximum line length is 80 characters. No violations found in
+R code.</li>
+<li><a href="https://style.tidyverse.org/syntax.html#indenting">Rule
+2.5.1</a> When indenting your code, use two spaces. No violations
+found.</li>
+<li><a href="https://style.tidyverse.org/syntax.html#commas">Rule
+2.2.1</a> Do not place a space before a comma, but always place one
+after a comma. No violations found.</li>
+<li><a href="https://style.tidyverse.org/syntax.html#parentheses">Rule
+2.2.2</a> Do not place spaces around code in parentheses or square
+brackets. No violations found.</li>
+</ul>
+<p><strong>Note:</strong> This submission is significantly incomplete —
+Q2.5, Q2.6, Q3, and Q4 are entirely missing, accounting for 80 points of
+deductions.</p>
+</body>
+</html>
