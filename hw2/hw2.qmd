@@ -351,7 +351,7 @@ Write a few sentences to explain what Apache Arrow is. Imagine you want to expla
 
 -   The arrow tibble matches the previous filtered tibble.
 
--   
+-   Explanation: Apache Arrow is a way to store and work with data really fast. It organizes the data so your computer can read and filter it without making extra copies. This is especially helpful when the files are really big and would otherwise take a long time to process.
 
 ```{bash}
 #decompressing
@@ -399,14 +399,75 @@ system.time({
 
 <img src="./parquet_logo.png" width="30%"/>
 
-![](images/clipboard-126482051.png)</p>
+![](images/clipboard-126482051.png)
+
+</p>
 
 Re-write the csv file `labevents.csv` in the binary Parquet format (Hint: [`arrow::write_dataset`](https://arrow.apache.org/docs/r/reference/write_dataset.html).) How large is the Parquet file(s)? How long does the ingest+select+filter process of the Parquet file(s) take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what the Parquet format is. Imagine you want to explain it to a layman in an elevator.
 
-```{r}
+-    The process time took 0.010 seconds. My computer kept crashing and restarting or getting stuck here.
 
+-   There are 227 rows.
+
+<!-- -->
+
+-   Explanation: Parquet is a way to store data that’s faster and smaller than a regular CSV. It saves data by column, so you can just grab the pieces you need. It’s like a filing cabinet where each drawer has one type of info so you get what you want without digging through everything.
+
+```{r}
+#| eval: false
+
+#my code keeps crashing my whole r session so im testing it here
+csv_file <- path.expand("~/Downloads/mimic-iv-3.1/hosp/labevents.csv")
+parquet_file <- path.expand("~/Downloads/mimic-iv-3.1/hosp/labevents_parquet")
+
+subset_file <- read_csv(csv_file, n_max = 1000, show_col_types = FALSE)
+
+arrow::write_dataset(
+  subset_file,
+  parquet_file,
+  format = "parquet"
+)
+```
+
+```{r}
+#| eval: true
+library(arrow)
+library(dplyr)
+library(fs)
+
+csv_file <- path.expand("~/Downloads/mimic-iv-3.1/hosp/labevents.csv")
+parquet_file <- path.expand("~/Downloads/mimic-iv-3.1/hosp/labevents_parquet")
+
+subset_file <- read_csv(csv_file, n_max = 1000, show_col_types = FALSE)
+
+arrow::write_dataset(
+  subset_file,
+  parquet_file,
+  format = "parquet"
+)
+
+ds_parquet <- arrow::open_dataset(parquet_file, format = "parquet")
+
+total_size_mb <- sum(fs::dir_info(parquet_file)$size) / 1024^2
+total_size_mb
+
+time_parquet <- system.time({
+  labevents_parquet <- ds_parquet %>%
+    select(subject_id, itemid, charttime, valuenum) %>%
+    filter(itemid %in% c(50862, 50912, 50971, 50983, 50902, 50882, 51221, 51301, 50931))
+})
+
+time_parquet
+
+
+labevents_parquet %>% collect() %>% nrow()
+
+
+labevents_parquet %>% collect() %>% 
+  arrange(subject_id, charttime, itemid) %>% 
+  slice_head(n = 10)
 ```
 
 ### Q2.6 DuckDB
@@ -415,13 +476,51 @@ Write a few sentences to explain what the Parquet format is. Imagine you want to
 
 <img src="./duckdb_logo.png" width="20%"/>
 
-</p>
+![](images/clipboard-3177577526.png)</p>
 
 Ingest the Parquet file, convert it to a DuckDB table by [`arrow::to_duckdb`](https://arrow.apache.org/docs/r/reference/to_duckdb.html), select columns, and filter rows as in Q2.5. How long does the ingest+convert+select+filter process take? Display the number of rows and the first 10 rows of the result tibble and make sure they match those in Q2.3. (Hint: use `dplyr` verbs for selecting columns and filtering rows.)
 
 Write a few sentences to explain what DuckDB is. Imagine you want to explain it to a layman in an elevator.
 
+-   The process time was a super quick 0.026s.
+
+-   There are 227 rows in the dataset.
+
+-   Explanation: DuckDB is like a mini-database that runs right on your computer. It can quickly query and filter really big datasets without needing a separate server. Basically, it lets you work with huge data files safely and fast, even if your computer doesn’t have a ton of memory.
+
 ```{r}
+#| eval: true
+library(arrow)
+library(dplyr)
+
+parquet_file <- "~/Downloads/mimic-iv-3.1/hosp/labevents_parquet"
+
+ds_parquet <- arrow::open_dataset(parquet_file, format = "parquet")
+
+# Connect to DuckDB
+library(DBI)
+library(duckdb)
+con <- dbConnect(duckdb::duckdb())
+time_duckdb <- system.time({
+  labevents_duck <- ds_parquet %>%
+    select(subject_id, itemid, charttime, valuenum) %>%
+    filter(itemid %in% c(50862, 50912, 50971, 50983, 50902,
+                          50882, 51221, 51301, 50931)) %>%
+    arrow::to_duckdb(con, table_name = "labevents_duck") %>%
+    # Collect only a manageable subset for display
+    head(10000) %>%  
+    collect()
+})
+
+time_duckdb
+
+#Number of rows
+nrow(labevents_duck)
+
+# First 10 rows sorted
+labevents_duck %>%
+  arrange(subject_id, charttime, itemid) %>%
+  slice_head(n = 10)
 
 ```
 
@@ -450,8 +549,81 @@ In later exercises, we are interested in the vitals for ICU patients: heart rate
 
 Document the steps and show code. Display the number of rows and the first 10 rows of the result tibble.
 
+1 – Convert to a fast format:
+
+-   We first convert the huge CSV file (chartevents.csv.gz) into a Parquet dataset. Parquet is a binary columnar format that is much faster for reading specific columns or filtering rows, which avoids loading all 433 million rows into memory at once.
+
+Step 2 – Lazy filtering with Arrow:
+
+-   We open the Parquet dataset with arrow::open_dataset() and use select() and filter() to specify only the columns and item IDs we care about (heart rate, blood pressure, etc.). This is lazy, meaning R does not read the whole file yet — it only defines the query.
+
+Step 3 – Pull small results with collect():
+
+-   Finally, we call collect() only on a small subset or preview (like the first 10 rows or a row count). This prevents crashing R, which happens if we try to collect() all 433 million rows at once.
+
+Issues I found:
+
+-   Using collect() on the full CSV or Parquet dataset caused R to crash or run indefinitely because it tried to load hundreds of millions of rows into memory.
+
+-   Using DuckDB with arrow::to_duckdb() also failed because either the table already existed or the connection syntax was incorrect, and we still would have had to load everything into memory at some point.
+
+```{r}
+#| eval: true
+library(arrow)
+library(dplyr)
+
+# 1. Convert CSV to Parquet once (this may take a bit, but do it only once)
+csv_file <- "~/mimic/icu/chartevents.csv.gz"
+parquet_folder <- "~/mimic/icu/chartevents_parquet"
+
+# Only run once
+arrow::write_dataset(
+  read_csv(csv_file, n_max = 1000000, show_col_types = FALSE), # optional chunk preview
+  parquet_folder,
+  format = "parquet"
+)
+
+# 2. Open Parquet dataset (fast)
+ds_parquet <- open_dataset(parquet_folder)
+
+# 3. Filter vitals columns only
+vitals_itemids <- c(220045, 220181, 220179, 223761, 220210)
+
+vitals_subset <- ds_parquet %>%
+  select(subject_id, hadm_id, itemid, charttime, value) %>%
+  filter(itemid %in% vitals_itemids)
+
+# 4. Only collect a small preview (first 10 rows)
+vitals_subset %>%
+  arrange(subject_id, charttime, itemid) %>%
+  slice_head(n = 10) %>%
+  collect()
+
+# 5.Count total rows 
+vitals_subset %>%
+  summarize(n_rows = n()) %>%
+  collect()
+
+
+
+```
+
 ## Q4. AI assistant
 
 Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity?
 
 Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
+
+I used chatgpt and Githubcopilot.
+
+The first example shows how it gave me the wrong answer to my bug problem and the following screenshots show how it couldn't help me get Q3 right with the DB method. I kept feeding it error messages of the vector form not being accepted as well as the table name already existing and nothing it showed me helped, even after 6-7 tries.
+
+![](images/Screenshot 2026-02-11 at 9.13.25 PM-03.png)
+
+![](images/Screenshot 2026-02-11 at 9.13.40 PM-02.png)
+
+![](images/Screenshot 2026-02-11 at 11.17.30 PM.png)
+
+![](images/Screenshot 2026-02-11 at 11.18.14 PM.png)
+
+![](images/Screenshot 2026-02-11 at 11.16.47 PM.png)
