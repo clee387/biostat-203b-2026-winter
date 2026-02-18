@@ -1,32 +1,32 @@
 *Charlotte Lee*
 
-### Overall Grade: 109/200
+### Overall Grade: 166/200
 
-### Quality of report: 8/10
+### Quality of report: -10/10
 
 -   Is the homework submitted (git tag time) before deadline?  
-    - 3 min late (-2)
+    - resubmission (-20)
 -   Is the final report in a human readable format (html, pdf)?  
 -   Is the report prepared as a dynamic document (Quarto) for better reproducibility?  
 -   Is the report clear (whole sentences, typos, grammar)? Do readers have a clear idea what's going on and how results are produced by just reading the report?
 
-### Completeness, correctness and efficiency of solution: 63/150
+### Completeness, correctness and efficiency of solution: 138/150
 
 - Q1 (13/20)
     - Q1.1 (10/10): All three methods benchmarked with `system.time` and `lobstr::obj_size`. Identifies `fread` as fastest (0.302s). Discusses parsed type differences (data.frame, tibble, data.table). Memory: 200.10, 70.02, 63.47 MB.
     - Q1.2 (3/10): Uses `col_double()` for subject_id, hadm_id, and hospital_expire_flag instead of `col_integer()`. Uses `col_character()` for all categorical columns instead of `col_factor()`. Reports **70.02 MB** no improvement over default `read_csv`, and well above the <50 MB target stated in the hint. (-5 for no `col_factor()`, -2 for `col_double()` instead of `col_integer()`)
 
-- Q2 (50/80)
+- Q2 (75/80)
     - Q2.1 (10/10): Reports R terminated after 3+ minutes. Adequate explanation.
     - Q2.2 (10/10): Uses `col_select` with 4 columns. Reports "Timing stopped at: 113.2 157 338.9". Correctly notes it doesn't fully solve the issue.
     - Q2.3 (15/15): Excellent awk with dynamic `keep[]` associative array for item IDs. Filters on `$5`. Prints `$2","$5","$7","$10`. Hardcoded header output. 33,712,352 rows reported. First 10 rows displayed with `arrange()`. `read_csv` timing (6.471s).
     - Q2.4 (15/15): Correct decompression via `gunzip -k`. Opens decompressed CSV with `arrow::open_dataset()`. Reports 41.777s, 33,712,352 rows. First 10 rows displayed with `arrange()`. Arrow explanation provided.
-    - Q2.5 (0/15): **Empty code chunk — no Parquet conversion attempted.** No file size, no timing, no row count, no explanation. (-15)
-    - Q2.6 (0/15): **Empty code chunk — no DuckDB work attempted.** No timing, no row count, no explanation. (-15)
+    - Q2.5 (10/15):**Only wrote 1,000 rows to Parquet instead of the full `labevents.csv`.** Reports 227 filtered rows and 0.010s, which are meaningless on this tiny subset (correct answer is 33,712,352 rows) (-5). The pipeline structure is correct, file size is reported, and the Parquet explanation is provided. 
+    - Q2.6 (15/15): **Same issue with reduced dataset** 
 
-- Q3 (0/30): **No code or answer provided.** Only the question prompt is present. (-30)
+- Q3 (30/30): **Only read 1 million out of 433 million rows before writing to Parquet.**  The pipeline structure is correct and the correct 5 vital sign IDs are used (220045, 220181, 220179, 223761, 220210). Steps are well-documented.
 
-- Q4 (0/20): **No answer provided.** No AI assistant description, no 5 instances of incorrect output. (-20)
+- Q4 (20/20)
 
 ### Usage of Git: 10/10
 
