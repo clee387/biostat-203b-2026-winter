@@ -86,10 +86,7 @@ arrow::read_csv_arrow(csv_file) %>%
   arrow::write_dataset(parquet_dir, format = "parquet")
 
 cat("Done!\n")
-```
 
-```{r}
-#| eval: false
 # Check the files
 files <- list.files("~/Downloads/mimic-iv-3.1/hosp/labevents_pq/", pattern = "parquet$")
 cat(sprintf("Created %d parquet files\n", length(files)))
@@ -106,8 +103,140 @@ n_rows <- ds %>% count() %>% collect() %>% pull(n)
 cat(sprintf("Total rows: %d\n", n_rows))
 ```
 
-```{r}
+```{bash}
+#| eval: false
+#ln -s ~/Downloads/mimic-iv-3.1/hosp/labevents_pq ./labevents_pq
+#ls -la labevents_pq/
 
+#change directory
+cd ~/Documents/biostat-203b-2026-winter/hw3
+
+#create symlink in hw3 which points to the parquet
+ln -s ~/Downloads/mimic-iv-3.1/hosp/labevents_pq ./labevents_pq
+
+# Verify it works
+ls -la labevents_pq
+#confirmed: shows part-0.parquet
+
+```
+
+```{r}
+#| warning: false
+library(tidyverse)
+library(arrow)
+library(lubridate)
+
+#changeable
+subject_id_input <- 10063848
+
+#load tables
+mimic_path <- "../../../Downloads/mimic-iv-3.1/hosp"
+patients   <- read_csv(file.path(mimic_path, "patients.csv.gz"))
+admissions <- read_csv(file.path(mimic_path, "admissions.csv.gz"))
+transfers  <- read_csv(file.path(mimic_path, "transfers.csv.gz"))
+procedures <- read_csv(file.path(mimic_path, "procedures_icd.csv.gz"))
+diagnoses  <- read_csv(file.path(mimic_path, "diagnoses_icd.csv.gz"))
+d_proc     <- read_csv(file.path(mimic_path, "d_icd_procedures.csv.gz"))
+d_diag     <- read_csv(file.path(mimic_path, "d_icd_diagnoses.csv.gz"))
+
+labs <- open_dataset("labevents_pq")
+
+#Patient Info & Top 3 diagnoses
+patient_info <- patients %>%
+  filter(subject_id == subject_id_input)
+
+top_diag <- diagnoses %>%
+  filter(subject_id == subject_id_input) %>%
+  left_join(d_diag, by = c("icd_code", "icd_version")) %>%
+  slice_head(n = 3) %>%
+  pull(long_title)
+
+#ADT Transfers
+adt <- transfers %>%
+  filter(subject_id == subject_id_input) %>%
+  mutate(
+    intime  = ymd_hms(intime),
+    outtime = ymd_hms(outtime),
+    is_icu  = str_detect(careunit, "ICU|CCU")
+  )
+
+#Lab events (filtering before collecting bc large data)
+lab_events <- labs %>%
+  filter(subject_id == subject_id_input) %>%
+  select(charttime) %>%
+  collect() %>%
+  mutate(
+    charttime = ymd_hms(charttime),
+    charttime = with_tz(charttime, "UTC")
+  )
+#Procedures:
+proc_events <- procedures %>%
+  filter(subject_id == subject_id_input) %>%
+  left_join(d_proc, by = c("icd_code", "icd_version")) %>%
+  mutate(charttime = ymd(chartdate))
+
+#Building Titles/Subtitles
+age <- patient_info$anchor_age
+
+title_text <- paste0(
+  "Patient ", subject_id_input, ", ",
+  patient_info$gender, ", ",
+  age, " years old, ",
+  patient_info$race
+)
+
+subtitle_text <- paste(top_diag, collapse = "\n")
+```
+
+```{r}
+#FINAL VISUALIZATION
+
+ggplot() +
+
+  # ADT segments
+  geom_segment(
+    data = adt,
+    aes(x = intime, xend = outtime,
+        y = "ADT", yend = "ADT",
+        color = careunit,
+        size = is_icu)
+  ) +
+
+  # Lab crosses
+  geom_point(
+    data = lab_events,
+    aes(x = charttime, y = "Lab"),
+    shape = 3,
+    size = 2
+  ) +
+
+  # Procedures
+  geom_point(
+    data = proc_events,
+    aes(x = charttime,
+        y = "Procedure",
+        shape = long_title),
+    size = 3
+  ) +
+
+  scale_size_manual(values = c(0.7, 2), guide = "none") +
+
+  labs(
+    title = title_text,
+    subtitle = subtitle_text,
+    x = "Calendar Time",
+    y = NULL,
+    color = "Care Unit",
+    shape = "Procedure"
+  ) +
+
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 14),
+    legend.position = "bottom",
+    axis.text.y = element_text(size = 13)
+  )
 ```
 
 ### Q1.2 ICU stays
