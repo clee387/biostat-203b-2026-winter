@@ -22,6 +22,8 @@ sessionInfo()
 Load necessary libraries (you can add more as needed).
 
 ```{r setup}
+#| message: false
+#| warning: false
 library(arrow)
 library(gtsummary)
 library(memuse)
