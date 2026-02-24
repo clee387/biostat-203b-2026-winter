@@ -602,14 +602,14 @@ lab_items <- c(
 
 lab_itemids <- as.integer(names(lab_items))
 
-# Start an in-memory DuckDB connection
+#start in-memory DuckDB connection
 con <- dbConnect(duckdb())
 
 # Register the ICU stays as a DuckDB table directly from R
 duckdb_register(con, "icu", icustays_tble |> select(subject_id, stay_id, intime))
 
-# Point DuckDB at the parquet folder — it reads it out-of-core,
-# never loading the full file into RAM
+#point DuckDB at the parquet folder — it reads it out-of-core,
+#not loading the full file into RAM
 dbExecute(con, "
   CREATE VIEW labevents_raw AS
   SELECT subject_id, itemid, storetime, valuenum
@@ -618,8 +618,8 @@ dbExecute(con, "
                    51221, 50971, 50983, 50931, 51301)
 ")
 
-# Single SQL query: join, filter storetime < intime, take max storetime
-# DuckDB does all of this on disk — nothing large enters R memory
+#single SQL query: join, filter storetime < intime, take max storetime
+#DuckDB does all of this on disk — nothing large enters R memory
 labevents_tble <- dbGetQuery(con, "
   WITH last_labs AS (
     SELECT
@@ -699,16 +699,107 @@ We are interested in the vitals for ICU patients: heart rate (220045), systolic 
 
 Hint: Use the Parquet format you generated in Homework 2. For reproducibility, make `chartevents_pq` folder available at the current working directory, for example, by a symbolic link.
 
+```{bash}
+~/Downloads/mimic-iv-3.1/icu/chartevents_pq/
+
+ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
+
+```
+
 ```{r}
 
+# Check if the folder exists
+dir.exists("chartevents_pq")
+
+# List any files in it
+list.files("chartevents_pq")
+
+# Define the vitals we are interested in
+vital_items <- c(
+  "220045" = "heart_rate",
+  "220179" = "systolic_bp",
+  "220180" = "diastolic_bp",
+  "223761" = "temp_f",
+  "220210" = "resp_rate"
+)
+vital_itemids <- as.integer(names(vital_items))
+
+# Start an in-memory DuckDB connection
+con <- dbConnect(duckdb())
+
+# Align DuckDB's working directory with R's
+dbExecute(con, paste0("SET home_directory='", getwd(), "'"))
+
+# Register ICU stays table in DuckDB
+duckdb_register(con, "icu", icustays_tble |> select(subject_id, stay_id, intime, outtime))
+
+# Create a view pointing to the Parquet folder for chartevents
+dbExecute(con, paste0("
+  CREATE VIEW chartevents_raw AS
+  SELECT subject_id, itemid, storetime, valuenum
+  FROM read_parquet('", file.path(getwd(), "chartevents_pq", "*.parquet"), "')
+  WHERE itemid IN (220045, 220179, 220180, 223761, 220210)
+"))
+
+# Query to get the first measurement within ICU stay
+chartevents_tble <- dbGetQuery(con, "
+  WITH first_vitals AS (
+    SELECT
+      i.subject_id,
+      i.stay_id,
+      c.itemid,
+      MIN(c.storetime) AS first_storetime
+    FROM chartevents_raw c
+    INNER JOIN icu i
+      ON c.subject_id = i.subject_id
+     AND c.storetime BETWEEN i.intime AND i.outtime
+    GROUP BY i.subject_id, i.stay_id, c.itemid
+  ),
+  with_values AS (
+    SELECT
+      fv.subject_id,
+      fv.stay_id,
+      fv.itemid,
+      c.valuenum
+    FROM first_vitals fv
+    INNER JOIN chartevents_raw c
+      ON fv.subject_id = c.subject_id
+     AND fv.itemid = c.itemid
+     AND fv.first_storetime = c.storetime
+  )
+  PIVOT with_values
+  ON itemid IN (220045, 220179, 220180, 223761, 220210)
+  USING first(valuenum)
+") |> 
+  as_tibble() |> 
+  rename(
+    heart_rate   = "220045",
+    systolic_bp  = "220179",
+    diastolic_bp = "220180",
+    temp_f       = "223761",
+    resp_rate    = "220210"
+  ) |> 
+  right_join(
+    icustays_tble |> select(subject_id, stay_id),
+    by = c("subject_id", "stay_id")
+  ) |> 
+  select(subject_id, stay_id, heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate) |> 
+  arrange(subject_id, stay_id)
+
+# Disconnect from DuckDB
+dbDisconnect(con)
+
+# Quick check
+print(dim(chartevents_tble))
+print(head(chartevents_tble))
 ```
 
 ## Q7. Putting things together
 
 Let us create a tibble `mimic_icu_cohort` for all ICU stays, where rows are all ICU stays of adults (age at `intime` \>= 18) and columns contain at least following variables
 
--   all variables in `icustays_tble`\
--   all variables in `admissions_tble`\
+-   all variables in `icustays_tble`
+-   all variables in `admissions_tble`
 -   all variables in `patients_tble`
 -   the last lab measurements before the ICU stay in `labevents_tble`
 -   the first vital measurements during the ICU stay in `chartevents_tble`
@@ -717,17 +808,100 @@ The final `mimic_icu_cohort` should have one row per ICU stay and columns for ea
 
 ![](mimic_icu_cohort.png)
 
+```{r}
+
+mimic_icu_cohort <- icustays_tble %>%
+  left_join(admissions_tble, by = c("subject_id", "hadm_id"))
+
+mimic_icu_cohort <- mimic_icu_cohort %>%
+  left_join(patients_tble, by = "subject_id")
+
+mimic_icu_cohort <- mimic_icu_cohort %>%
+  left_join(labevents_tble, by = c("subject_id", "stay_id")) %>%
+  left_join(chartevents_tble, by = c("subject_id", "stay_id"))
+
+mimic_icu_cohort <- mimic_icu_cohort %>%
+  filter(anchor_age >= 18) %>%
+  arrange(subject_id, stay_id)
+```
+
 ## Q8. Exploratory data analysis (EDA)
 
 Summarize the following information about the ICU stay cohort `mimic_icu_cohort` using appropriate numerics or graphs:
 
 -   Length of ICU stay `los` vs demographic variables (race, insurance, marital_status, gender, age at intime)
 
+    ```{r}
+    #LOS vs Race
+    ggplot(mimic_icu_cohort, aes(x = race, y = los)) +
+      geom_boxplot() +
+      scale_y_continuous(trans = "log1p") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    #LOS vs Insurance
+    ggplot(mimic_icu_cohort, aes(x = insurance, y = los)) +
+      geom_boxplot() +
+      scale_y_continuous(trans = "log1p") +
+      theme_minimal()
+
+    #LOS vs Gender
+    ggplot(mimic_icu_cohort, aes(x = gender, y = los)) +
+      geom_boxplot(fill = "steelblue") +
+      scale_y_continuous(trans = "log1p") +
+      labs(title = "ICU LOS by Gender",
+           y = "Length of Stay (log scale)",
+           x = "Gender") +
+      theme_minimal() 
+
+    #LOS vs Marital status
+    ggplot(mimic_icu_cohort, aes(x = marital_status, y = los)) +
+      geom_boxplot() +
+      scale_y_continuous(trans = "log1p") +
+      theme_minimal()
+
+    #LOS vs Age at ICU admission
+    ggplot(mimic_icu_cohort, aes(x = anchor_age, y = los)) +
+      geom_point(alpha = 0.2) +
+      geom_smooth(method = "loess", color = "red") +
+      scale_y_continuous(trans = "log1p") +
+      labs(title = "ICU LOS vs Age",
+           x = "Age",
+           y = "Length of Stay (log scale)") +
+      theme_minimal()
+    ```
+
 -   Length of ICU stay `los` vs the last available lab measurements before ICU stay
+
+    ```{r}
+    ggplot(mimic_icu_cohort, aes(x = los)) +
+      geom_histogram(bins = 50) +
+      labs(title = "Distribution of ICU Length of Stay",
+           x = "ICU LOS (days)",
+           y = "Count")
+
+    mimic_icu_cohort <- mimic_icu_cohort %>%
+      mutate(log_los = log(los))
+
+    ggplot(mimic_icu_cohort, aes(x = creatinine, y = log_los)) +
+      geom_point(alpha = 0.2) +
+      geom_smooth(method = "loess") +
+      labs(title = "Log ICU LOS vs Last Creatinine Before ICU",
+           x = "Creatinine",
+           y = "Log ICU LOS")
+    ```
 
 -   Length of ICU stay `los` vs the first vital measurements within the ICU stay
 
+    ```{r}
+
+    ```
+
 -   Length of ICU stay `los` vs first ICU unit
+
+```{r}
+
+```
 
 ## Q9. AI assistant
 
