@@ -525,16 +525,6 @@ According to the [MIMIC-IV documentation](https://mimic.mit.edu/docs/iv/about/co
 
 > All dates in the database have been shifted to protect patient confidentiality. Dates will be internally consistent for the same patient, but randomly distributed in the future. Dates of birth which occur in the present time are not true dates of birth. Furthermore, dates of birth which occur before the year 1900 occur if the patient is older than 89. In these cases, the patient’s age at their first admission has been fixed to 300.
 
-```{r}
-
-age = as.numeric(difftime(admittime, dob, units = "days")) / 365
-los_data <- los_data %>%
-  mutate(age = ifelse(age > 89, 90, age))
-mutate(age = pmin(age, 90))
-
-los_days = difftime(dischtime, admittime)
-```
-
 ## Q4. `patients` data
 
 Patient information is available in `patients.csv.gz`. See <https://mimic.mit.edu/docs/iv/modules/hosp/patients/> for details of each field in this file. The first 10 lines are
@@ -547,9 +537,31 @@ zcat < ~/mimic/hosp/patients.csv.gz | head
 
 Import `patients.csv.gz` (<https://mimic.mit.edu/docs/iv/modules/hosp/patients/>) as a tibble `patients_tble`.
 
+```{r}
+patients_tble <- read_csv("~/Downloads/mimic-iv-3.1/hosp/patients.csv.gz", show_col_types = FALSE)
+
+```
+
 ### Q4.2 Summary and visualization
 
 Summarize variables `gender` and `anchor_age` by graphics, and explain any patterns you see.
+
+-   The distribution is slightly right skewed with 20 years old being the most common age with 25 and 30 following that.
+
+-   There is a slight hump at 55-65 age range which makes sense because most common chronic conditions occur around then. The age range is till 90 because the data caps at then.
+
+```{r}
+ggplot(patients_tble, aes(x = anchor_age)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  scale_x_continuous(breaks = seq(0, 90, 10)) +
+  labs(
+    title = "Age Distribution of Patients (Capped at 90)",
+    x = "Age (years)",
+    y = "Number of Patients"
+  ) +
+  theme_minimal()
+
+```
 
 ## Q5. Lab results
 
@@ -571,6 +583,102 @@ We are interested in the lab measurements of albumin (50862), creatinine (50912)
 
 Hint: Use the Parquet format you generated in Homework 2. For reproducibility, make `labevents_pq` folder available at the current working directory `hw3`, for example, by a symbolic link.
 
+```{r}
+#| warning: true
+library(DBI)
+library(duckdb)
+
+lab_items <- c(
+  "50862" = "albumin",
+  "50882" = "bicarbonate",
+  "50902" = "chloride",
+  "50912" = "creatinine",
+  "50931" = "glucose",
+  "51221" = "hematocrit",
+  "50971" = "potassium",
+  "50983" = "sodium",
+  "51301" = "wbc"
+)
+
+lab_itemids <- as.integer(names(lab_items))
+
+# Start an in-memory DuckDB connection
+con <- dbConnect(duckdb())
+
+# Register the ICU stays as a DuckDB table directly from R
+duckdb_register(con, "icu", icustays_tble |> select(subject_id, stay_id, intime))
+
+# Point DuckDB at the parquet folder — it reads it out-of-core,
+# never loading the full file into RAM
+dbExecute(con, "
+  CREATE VIEW labevents_raw AS
+  SELECT subject_id, itemid, storetime, valuenum
+  FROM read_parquet('./labevents_pq/*.parquet')
+  WHERE itemid IN (50862, 50882, 50902, 50912, 50931,
+                   51221, 50971, 50983, 50931, 51301)
+")
+
+# Single SQL query: join, filter storetime < intime, take max storetime
+# DuckDB does all of this on disk — nothing large enters R memory
+labevents_tble <- dbGetQuery(con, "
+  WITH last_labs AS (
+    SELECT
+      i.subject_id,
+      i.stay_id,
+      l.itemid,
+      MAX(l.storetime) AS last_storetime
+    FROM labevents_raw l
+    INNER JOIN icu i
+      ON l.subject_id = i.subject_id
+     AND l.storetime  < i.intime
+    GROUP BY i.subject_id, i.stay_id, l.itemid
+  ),
+  with_values AS (
+    SELECT
+      ll.subject_id,
+      ll.stay_id,
+      ll.itemid,
+      l.valuenum
+    FROM last_labs ll
+    INNER JOIN labevents_raw l
+      ON ll.subject_id     = l.subject_id
+     AND ll.itemid         = l.itemid
+     AND ll.last_storetime = l.storetime
+  )
+  PIVOT with_values
+  ON itemid IN (
+    50862, 50882, 50902, 50912, 50931,
+    51221, 50971, 50983, 51301
+  )
+  USING first(valuenum)
+") |>
+  as_tibble() |>
+  rename(
+    albumin    = "50862",
+    bicarbonate= "50882",
+    chloride   = "50902",
+    creatinine = "50912",
+    glucose    = "50931",
+    hematocrit = "51221",
+    potassium  = "50971",
+    sodium     = "50983",
+    wbc        = "51301"
+  ) |>
+  right_join(
+    icustays_tble |> select(subject_id, stay_id),
+    by = c("subject_id", "stay_id")
+  ) |>
+  select(subject_id, stay_id,
+         albumin, bicarbonate, chloride, creatinine, glucose,
+         hematocrit, potassium, sodium, wbc) |>
+  arrange(subject_id, stay_id)
+
+dbDisconnect(con)
+
+print(dim(labevents_tble))
+print(head(labevents_tble))
+```
+
 ## Q6. Vitals from charted events
 
 `chartevents.csv.gz` (<https://mimic.mit.edu/docs/iv/modules/icu/chartevents/>) contains all the charted data available for a patient. During their ICU stay, the primary repository of a patient’s information is their electronic chart. The `itemid` variable indicates a single measurement type in the database. The `value` variable is the value measured for `itemid`. The first 10 lines of `chartevents.csv.gz` are
@@ -590,6 +698,10 @@ We are interested in the vitals for ICU patients: heart rate (220045), systolic 
 ![](chartevents_tble.png)
 
 Hint: Use the Parquet format you generated in Homework 2. For reproducibility, make `chartevents_pq` folder available at the current working directory, for example, by a symbolic link.
+
+```{r}
+
+```
 
 ## Q7. Putting things together
 
