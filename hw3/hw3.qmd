@@ -901,13 +901,35 @@ Summarize the following information about the ICU stay cohort `mimic_icu_cohort`
 -   Length of ICU stay `los` vs the first vital measurements within the ICU stay
 
     ```{r}
-
+chartevents_tble |>
+  left_join(mimic_icu_cohort |> select(stay_id, los), by = "stay_id") |>
+  pivot_longer(
+    cols = c(heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate),
+    names_to = "vital",
+    values_to = "value"
+  ) |>
+  ggplot(aes(x = value, y = los)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "gam", formula = y ~ s(x), color = "red") +
+  scale_y_continuous(trans = "log1p") +
+  facet_wrap(~vital, scales = "free_x") +
+  labs(title = "ICU LOS vs First Vital Measurements",
+       x = "Vital Measurement",
+       y = "Length of Stay (log scale)") +
+  theme_minimal()
     ```
 
 -   Length of ICU stay `los` vs first ICU unit
 
 ```{r}
-
+ggplot(mimic_icu_cohort, aes(x = first_careunit, y = los)) +
+  geom_boxplot() +
+  scale_y_continuous(trans = "log1p") +
+  labs(title = "ICU LOS vs First ICU Unit",
+       x = "First Care Unit",
+       y = "Length of Stay (log scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ## Q9. AI assistant
@@ -915,3 +937,6 @@ Summarize the following information about the ICU stay cohort `mimic_icu_cohort`
 Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity?
 
 Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
+
+
+
