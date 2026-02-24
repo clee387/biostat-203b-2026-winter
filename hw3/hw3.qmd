@@ -870,7 +870,7 @@ Summarize the following information about the ICU stay cohort `mimic_icu_cohort`
     #LOS vs Age at ICU admission
     ggplot(mimic_icu_cohort, aes(x = anchor_age, y = los)) +
       geom_point(alpha = 0.2) +
-      geom_smooth(method = "loess", color = "red") +
+      geom_smooth(method = "gam", formula = y ~ s(x), color = "red") +
       scale_y_continuous(trans = "log1p") +
       labs(title = "ICU LOS vs Age",
            x = "Age",
