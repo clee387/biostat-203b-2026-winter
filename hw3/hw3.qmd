@@ -700,9 +700,9 @@ We are interested in the vitals for ICU patients: heart rate (220045), systolic 
 Hint: Use the Parquet format you generated in Homework 2. For reproducibility, make `chartevents_pq` folder available at the current working directory, for example, by a symbolic link.
 
 ```{bash}
-~/Downloads/mimic-iv-3.1/icu/chartevents_pq/
+#~/Downloads/mimic-iv-3.1/icu/chartevents_pq/
 
-ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
+#ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
 
 ```
 
