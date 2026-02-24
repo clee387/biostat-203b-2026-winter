@@ -210,6 +210,7 @@ ggplot() +
     size = 3
   ) +
   scale_linewidth_manual(values = c(0.7, 2), guide = "none") +
+  scale_y_discrete(limits = rev) +
   labs(
     title = title_text,
     subtitle = subtitle_text,
@@ -224,7 +225,7 @@ ggplot() +
     plot.subtitle = element_text(size = 14),
     legend.position = "bottom",
     axis.text.y = element_text(size = 13)
-  ) + scale_y_discrete(limits = rev)
+  ) 
 ```
 
 ### Q1.2 ICU stays
@@ -234,6 +235,79 @@ ICU stays are a subset of ADT history. This figure shows the vitals of the patie
 ![](10001217_icu.png)
 
 Do a similar visualization for the patient `10063848`.
+
+```{bash}
+
+#gunzip -c ~/Downloads/mimic-iv-3.1/icu/d_items.csv.gz | grep -E "HR|NBPd|NBPs|RR|Temperature"
+
+#vital_itemids <- c(
+ # 220045,  # HR
+ # 220179,  # NBPs (systolic)
+ # 220180,  # NBPd (diastolic)
+ # 220210,  # RR
+#  223761  ) # Temperature Fahrenheit
+
+
+
+```
+
+```{r}
+library(tidyverse)
+library(arrow)
+library(lubridate)
+
+# Configuration
+subject_id_input <- 10063848
+icu_path <- "../../../Downloads/mimic-iv-3.1/icu"
+hosp_path <- "../../../Downloads/mimic-iv-3.1/hosp"
+
+# Load small files with read_csv
+icustays <- read_csv(gzfile(file.path(icu_path, "icustays.csv.gz")), show_col_types = FALSE)
+d_items <- read_csv(gzfile(file.path(icu_path, "d_items.csv.gz")), show_col_types = FALSE)
+
+# Use Arrow to read large chartevents - much faster!
+vital_itemids <- c(220045, 220179, 220180, 220210, 223761)
+
+chartevents_dataset <- open_dataset(file.path(icu_path, "chartevents.csv.gz"), format = "csv")
+
+vitals_icu <- chartevents_dataset %>%
+  filter(subject_id == subject_id_input, itemid %in% vital_itemids) %>%
+  select(stay_id, charttime, itemid, valuenum) %>%
+  collect() %>%
+  mutate(charttime = ymd_hms(charttime)) %>%
+  filter(!is.na(valuenum)) %>%
+  left_join(d_items %>% select(itemid, abbreviation), by = "itemid") %>%
+  inner_join(
+    icustays %>% 
+      filter(subject_id == subject_id_input) %>%
+      mutate(intime = ymd_hms(intime), outtime = ymd_hms(outtime)) %>%
+      select(stay_id, intime, outtime),
+    by = "stay_id"
+  ) %>%
+  filter(charttime >= intime & charttime <= outtime) %>%
+  select(stay_id, charttime, abbreviation, valuenum)
+
+# Create plot
+p <- ggplot(vitals_icu, aes(x = charttime, y = valuenum, color = abbreviation)) +
+  geom_point(size = 2) +
+  geom_line(alpha = 0.6) +
+  facet_grid(abbreviation ~ stay_id, scales = "free_y") +
+  labs(
+    title = sprintf("Patient %d ICU stays - Vitals", subject_id_input),
+    x = "Calendar Time",
+    y = "Value"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+    legend.position = "right"
+  )
+
+print(p)
+ggsave("icu_vitals_10063848.png", width = 16, height = 10, dpi = 300)
+cat("✓ Saved: icu_vitals_10063848.png\n")
+```
 
 ## Q2. ICU stays
 
@@ -247,9 +321,17 @@ zcat < ~/mimic/icu/icustays.csv.gz | head
 
 Import `icustays.csv.gz` as a tibble `icustays_tble`.
 
+```{r}
+
+```
+
 ### Q2.2 Summary and visualization
 
 How many unique `subject_id`? Can a `subject_id` have multiple ICU stays? Summarize the number of ICU stays per `subject_id` by graphs.
+
+```{r}
+
+```
 
 ## Q3. `admissions` data
 
