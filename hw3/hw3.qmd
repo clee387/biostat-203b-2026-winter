@@ -707,33 +707,38 @@ ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
 ```
 
 ```{r}
+#| eval: true
 
-# Check if the folder exists
-dir.exists("chartevents_pq")
+# Find your mimic path - check which one exists
+file.exists("~/mimic/icu/chartevents.csv.gz")
+file.exists("~/Documents/biostat-203b-2026-winter/mimic-iv-3.1/icu/chartevents.csv.gz")
+list.files("~/Documents/biostat-203b-2026-winter/mimic-iv-3.1/icu/") 
 
-# List any files in it
+# Remove the existing file
+file.remove("chartevents_pq")
+
+# Create as proper directory
+dir.create("chartevents_pq")
+
+# Now convert to parquet
+library(arrow)
+open_dataset(
+  "~/mimic/icu/chartevents.csv.gz",
+  format = "csv"
+) |>
+  write_dataset("chartevents_pq", format = "parquet")
+
+# Verify
 list.files("chartevents_pq")
 
-# Define the vitals we are interested in
-vital_items <- c(
-  "220045" = "heart_rate",
-  "220179" = "systolic_bp",
-  "220180" = "diastolic_bp",
-  "223761" = "temp_f",
-  "220210" = "resp_rate"
-)
-vital_itemids <- as.integer(names(vital_items))
 
-# Start an in-memory DuckDB connection
 con <- dbConnect(duckdb())
-
-# Align DuckDB's working directory with R's
 dbExecute(con, paste0("SET home_directory='", getwd(), "'"))
 
-# Register ICU stays table in DuckDB
+# Register ICU stays
 duckdb_register(con, "icu", icustays_tble |> select(subject_id, stay_id, intime, outtime))
 
-# Create a view pointing to the Parquet folder for chartevents
+# Create the chartevents view
 dbExecute(con, paste0("
   CREATE VIEW chartevents_raw AS
   SELECT subject_id, itemid, storetime, valuenum
@@ -741,9 +746,9 @@ dbExecute(con, paste0("
   WHERE itemid IN (220045, 220179, 220180, 223761, 220210)
 "))
 
-# Query to get the first measurement within ICU stay
+# Run the main query
 chartevents_tble <- dbGetQuery(con, "
-  WITH first_vitals AS (
+  WITH first_storetimes AS (
     SELECT
       i.subject_id,
       i.stay_id,
@@ -755,41 +760,43 @@ chartevents_tble <- dbGetQuery(con, "
      AND c.storetime BETWEEN i.intime AND i.outtime
     GROUP BY i.subject_id, i.stay_id, c.itemid
   ),
-  with_values AS (
+  avg_values AS (
     SELECT
-      fv.subject_id,
-      fv.stay_id,
-      fv.itemid,
-      c.valuenum
-    FROM first_vitals fv
+      fs.subject_id,
+      fs.stay_id,
+      fs.itemid,
+      AVG(c.valuenum) AS avg_valuenum
+    FROM first_storetimes fs
     INNER JOIN chartevents_raw c
-      ON fv.subject_id = c.subject_id
-     AND fv.itemid = c.itemid
-     AND fv.first_storetime = c.storetime
+      ON fs.subject_id      = c.subject_id
+     AND fs.itemid          = c.itemid
+     AND fs.first_storetime = c.storetime
+    INNER JOIN icu i
+      ON fs.stay_id = i.stay_id
+     AND c.storetime BETWEEN i.intime AND i.outtime
+    GROUP BY fs.subject_id, fs.stay_id, fs.itemid
   )
-  PIVOT with_values
+  PIVOT avg_values
   ON itemid IN (220045, 220179, 220180, 223761, 220210)
-  USING first(valuenum)
-") |> 
-  as_tibble() |> 
+  USING avg(avg_valuenum)
+") |>
+  as_tibble() |>
   rename(
-    heart_rate   = "220045",
-    systolic_bp  = "220179",
-    diastolic_bp = "220180",
-    temp_f       = "223761",
-    resp_rate    = "220210"
-  ) |> 
+    heart_rate   = '220045',
+    systolic_bp  = '220179',
+    diastolic_bp = '220180',
+    temp_f       = '223761',
+    resp_rate    = '220210'
+  ) |>
   right_join(
     icustays_tble |> select(subject_id, stay_id),
     by = c("subject_id", "stay_id")
-  ) |> 
-  select(subject_id, stay_id, heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate) |> 
+  ) |>
+  select(subject_id, stay_id, heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate) |>
   arrange(subject_id, stay_id)
 
-# Disconnect from DuckDB
 dbDisconnect(con)
 
-# Quick check
 print(dim(chartevents_tble))
 print(head(chartevents_tble))
 ```
