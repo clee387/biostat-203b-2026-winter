@@ -304,9 +304,9 @@ p <- ggplot(vitals_icu, aes(x = charttime, y = valuenum, color = abbreviation)) 
     legend.position = "right"
   )
 
-print(p)
-ggsave("icu_vitals_10063848.png", width = 16, height = 10, dpi = 300)
-cat("✓ Saved: icu_vitals_10063848.png\n")
+#print(p)
+#ggsave("icu_vitals_10063848.png", width = 16, height = 10, dpi = 300)
+#cat("✓ Saved: icu_vitals_10063848.png\n")
 ```
 
 ## Q2. ICU stays
@@ -323,6 +323,11 @@ Import `icustays.csv.gz` as a tibble `icustays_tble`.
 
 ```{r}
 
+icustays_tble <- read_csv(gzfile(file.path(icu_path, "icustays.csv.gz")), show_col_types = FALSE)
+
+
+icustays_tble <- read_csv(gzfile(file.path(icu_path, "icustays.csv.gz")), show_col_types = FALSE) %>%
+  as_tibble()
 ```
 
 ### Q2.2 Summary and visualization
@@ -330,6 +335,56 @@ Import `icustays.csv.gz` as a tibble `icustays_tble`.
 How many unique `subject_id`? Can a `subject_id` have multiple ICU stays? Summarize the number of ICU stays per `subject_id` by graphs.
 
 ```{r}
+library(tidyverse)
+
+icu_path <- "../../../Downloads/mimic-iv-3.1/icu"
+
+# Load icustays as tibble
+icustays_tble <- read_csv(gzfile(file.path(icu_path, "icustays.csv.gz")), show_col_types = FALSE)
+
+# Summarize: number of ICU stays per subject_id
+stays_per_subject <- icustays_tble %>%
+  group_by(subject_id) %>%
+  summarize(n_stays = n(), .groups = "drop")
+
+# Graph 1: Histogram of ICU stays distribution
+p1 <- ggplot(stays_per_subject, aes(x = n_stays)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  scale_x_continuous(limits = c(0, 15)) +  # Limit x-axis to 0-30
+  labs(
+    title = "Distribution of Number of ICU Stays per Subject",
+    x = "Number of ICU Stays",
+    y = "Number of Subjects"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+# Graph 2: Density plot
+p2 <- ggplot(stays_per_subject, aes(x = n_stays)) +
+  geom_density(fill = "steelblue", alpha = 0.6) +
+  scale_x_continuous(limits = c(0, 15)) +  # Limit x-axis to 0-30
+  labs(
+    title = "Density of Number of ICU Stays per Subject",
+    x = "Number of ICU Stays",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+# Graph 3: Box plot (no x-axis limit needed)
+p3 <- ggplot(stays_per_subject, aes(y = n_stays)) +
+  geom_boxplot(fill = "steelblue") +
+  scale_y_continuous(limits = c(0, 50)) +  # Limit y-axis to 0-30
+  labs(
+    title = "Box Plot of ICU Stays per Subject",
+    y = "Number of ICU Stays"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+print(p1)
+print(p2)
+print(p3)
 
 ```
 
