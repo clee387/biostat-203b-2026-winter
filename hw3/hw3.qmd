@@ -364,7 +364,7 @@ stays_per_subject <- icustays_tble %>%
   group_by(subject_id) %>%
   summarize(n_stays = n(), .groups = "drop")
 
-# Graph 1: Histogram of ICU stays distribution
+# Graph 1: Bar Chart of ICU stays distribution
 p1 <- ggplot(stays_per_subject, aes(x = n_stays)) +
   geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
   scale_x_continuous(limits = c(0, 15)) +  # Limit x-axis to 0-30
@@ -470,7 +470,7 @@ ggplot(hour_counts, aes(x = admission_hour, y = n)) +
 -   **admission minute (anything unusual?)**
 
     -   The distribution of number of admissions is around 8,000 with the highest count at the 0th minute with the fifteenth minute, 30th minute, and 45th minute of admission following.
-    -   This pattern of 0, 15, 30, and 45 seems to likely have been used as a system default or sort of rounding.
+    -   This pattern of 0, 15, 30, and 45 seems to likely have been used as a system default or sort of rounding method by the hospital.
 
     ```{r}
     #change to minutes
