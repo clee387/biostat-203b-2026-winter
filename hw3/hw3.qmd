@@ -700,27 +700,27 @@ We are interested in the vitals for ICU patients: heart rate (220045), systolic 
 Hint: Use the Parquet format you generated in Homework 2. For reproducibility, make `chartevents_pq` folder available at the current working directory, for example, by a symbolic link.
 
 ```{bash}
-~/Downloads/mimic-iv-3.1/icu/chartevents_pq/
+#~/Downloads/mimic-iv-3.1/icu/chartevents_pq/
 
-ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
+#ln -s ~/Downloads/mimic-iv-3.1/icu/chartevents_pq ./chartevents_pq
 
 ```
 
 ```{r}
 #| eval: true
 
-# Find your mimic path - check which one exists
+#Find mimic path - check which one exists
 file.exists("~/mimic/icu/chartevents.csv.gz")
 file.exists("~/Documents/biostat-203b-2026-winter/mimic-iv-3.1/icu/chartevents.csv.gz")
 list.files("~/Documents/biostat-203b-2026-winter/mimic-iv-3.1/icu/") 
 
-# Remove the existing file
+#Remove existing file
 file.remove("chartevents_pq")
 
-# Create as proper directory
+#create as proper directory
 dir.create("chartevents_pq")
 
-# Now convert to parquet
+#convert to parquet
 library(arrow)
 open_dataset(
   "~/mimic/icu/chartevents.csv.gz",
@@ -728,17 +728,17 @@ open_dataset(
 ) |>
   write_dataset("chartevents_pq", format = "parquet")
 
-# Verify
+#verify
 list.files("chartevents_pq")
 
 
 con <- dbConnect(duckdb())
 dbExecute(con, paste0("SET home_directory='", getwd(), "'"))
 
-# Register ICU stays
+#register ICU stays
 duckdb_register(con, "icu", icustays_tble |> select(subject_id, stay_id, intime, outtime))
 
-# Create the chartevents view
+#chartevents view create
 dbExecute(con, paste0("
   CREATE VIEW chartevents_raw AS
   SELECT subject_id, itemid, storetime, valuenum
@@ -746,7 +746,7 @@ dbExecute(con, paste0("
   WHERE itemid IN (220045, 220179, 220180, 223761, 220210)
 "))
 
-# Run the main query
+#run main query
 chartevents_tble <- dbGetQuery(con, "
   WITH first_storetimes AS (
     SELECT
@@ -938,4 +938,24 @@ Which AI assistants (e.g., GitHub Copilot) do you use when working on this assig
 
 Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
 
-![](image1.png) ![](image2.png) ![](image3.png) ![](image4.png)
+-   I used a mix of GPT-5 and also Claude Sonnet 4.5. I used both models when I had errors with creating the parquet. It kept giving me methods where my computer would max out storage and so these are all the times when I had to ask for help in debugging. It did not give me the most efficient ways to solve this problem so I got stuck on problems where I needed to be able to create the parquet.
+
+-   They did not really help increase my productivity because the code they gave me produced the same errors of maxing out my storage and point to a different directory making my work even more confusing where I would get lost in my own code.
+
+![](image1.png)
+
+![](image2.png)
+
+![](image3.png)
+
+![](image4.png)
+
+![](image5.png)
+
+\
+\
+\
+
+```{bash}
+git push origin develop --verbose
+```
