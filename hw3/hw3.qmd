@@ -942,8 +942,20 @@ Give 5 instances where AI model gave incorrect or misleading answers. You can us
 
 -   They did not really help increase my productivity because the code they gave me produced the same errors of maxing out my storage and point to a different directory making my work even more confusing where I would get lost in my own code.
 
-![](image1.png) 
-![](image2.png) 
-![](image3.png) 
-![](image4.png) 
-![](image5.png) 
+![](image1.png)
+
+![](image2.png)
+
+![](image3.png)
+
+![](image4.png)
+
+![](image5.png)
+
+\
+\
+\
+
+```{bash}
+git push origin develop --verbose
+```
