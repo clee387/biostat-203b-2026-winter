@@ -107,6 +107,7 @@ patients_tble <-tbl(con_bq, "patients") |>
 Connect to the `labevents` table and retrieve a subset that only contain subjects who appear in `icustays_tble` and the lab items listed in HW3. Only keep the last lab measurements (by `storetime`) before the ICU stay and pivot lab items to become variables/columns. Write all steps in *one* chain of pipes.
 
 ```{r}
+#| warning: false
 # # TODO
 labevents_tble <- tbl(con_bq, "labevents") %>%
   filter(itemid %in% c(50862, 50912, 50971, 50983, 50902, 50882, 51221, 51301, 50931)) %>%
@@ -127,8 +128,26 @@ labevents_tble
 Connect to `chartevents` table and retrieve a subset that only contain subjects who appear in `icustays_tble` and the chart events listed in HW3. Only keep the first chart events (by `storetime`) during ICU stay and pivot chart events to become variables/columns. Write all steps in *one* chain of pipes. Similary to HW3, if a vital has multiple measurements at the first `storetime`, average them.
 
 ```{r}
+#| warning: false
 # # TODO
-# chartevents_tble <- 
+chartevents_tble <- tbl(con_bq, "chartevents") %>%
+  filter(itemid %in% c(220045, 220179, 220180, 223761, 220210)) %>%
+  semi_join(icustays_tble, by = "subject_id") %>%
+  left_join(icustays_tble %>% select(subject_id, stay_id, intime, outtime), by = c("subject_id", "stay_id")) %>%
+  filter(storetime >= intime, storetime <= outtime) %>%
+  group_by(subject_id, stay_id, itemid) %>%
+  filter(storetime == min(storetime, na.rm = TRUE)) %>%
+  summarise(valuenum = mean(valuenum, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = itemid, values_from = valuenum) %>%
+  rename(
+    heart_rate   = "220045",
+    systolic_bp  = "220179",
+    diastolic_bp = "220180",
+    temp_f       = "223761",
+    resp_rate    = "220210"
+  )
+chartevents_tble
 ```
 
 ### Q1.7 Put things together
@@ -136,8 +155,29 @@ Connect to `chartevents` table and retrieve a subset that only contain subjects 
 This step is similar to Q7 of HW3. Using *one* chain of pipes `|>` to perform following data wrangling steps: (i) start with the `icustays_tble`, (ii) merge in admissions and patients tables, (iii) keep adults only (age at ICU intime \>= 18), (iv) merge in the labevents and chartevents tables, (v) `collect` the tibble, (vi) sort `subject_id`, `hadm_id`, `stay_id` and `print(width = Inf)`.
 
 ```{r}
+#| warnings: false
 # # TODO
-# mimic_icu_cohort <- 
+mimic_icu_cohort <- icustays_tble %>%
+  left_join(tbl(con_bq, "admissions"), by = c("subject_id", "hadm_id")) %>%
+  left_join(tbl(con_bq, "patients"), by = "subject_id") %>%
+  mutate(age_intime = year(intime) - anchor_year + anchor_age) %>%
+  filter(age_intime >= 18) %>%
+  left_join(labevents_tble, by = "subject_id") %>%
+  left_join(chartevents_tble, by = c("subject_id", "stay_id")) %>%
+  collect() %>%
+  rename(
+    albumin     = "50862",
+    bicarbonate = "50882",
+    chloride    = "50902",
+    creatinine  = "50912",
+    glucose     = "50931",
+    hematocrit  = "51221",
+    potassium   = "50971",
+    sodium      = "50983",
+    wbc         = "51301"
+  ) %>%
+  arrange(subject_id, hadm_id, stay_id) %>%
+  print(width = Inf)
 ```
 
 ### Q1.8 Preprocessing
