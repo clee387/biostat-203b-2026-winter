@@ -8,3 +8,8 @@ hw2/*.csv*
 hw2/*.csv*
 hw2/*.csv*
 hw2/*.csv*
+hw3/chartevents_pq/
+*.parquet
+*.html
+*.png
+*.DS_Store
