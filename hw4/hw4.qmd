@@ -1,7 +1,7 @@
 ---
 title: "Biostat 203B Homework 4"
 subtitle: "Due Mar 11 @ 11:59PM"
-author: "Your Name and UID"
+author: "Charlotte Lee and 206782165"
 format:
   html:
     theme: cosmo
@@ -28,6 +28,8 @@ memuse::Sys.meminfo()
 Load database libraries and the tidyverse frontend:
 
 ```{r}
+#| message: false
+#| warning: false
 library(bigrquery)
 library(dbplyr)
 library(DBI)
@@ -42,24 +44,16 @@ Below is an outline of steps. In this homework, we exclusively work with the Big
 
 ### Q1.1 Connect to BigQuery
 
-Authenticate with BigQuery using the service account token. Please place the service account token (shared via BruinLearn) in the working directory (same folder as your qmd file). Do **not** ever add this token to your Git repository. If you do so, you will lose 50 points.
+174Connect to BigQuery database `mimiciv_3_1` in GCP (Google Cloud Platform), using the project billing account `biostat-203b-2025-winter`.
 
 ```{r}
-# path to the service account token 
-satoken <- "biostat-203b-2026-winter-92fefbfab477.json"
-# BigQuery authentication using service account
-bq_auth(path = satoken)
-```
-
-Connect to BigQuery database `mimiciv_3_1` in GCP (Google Cloud Platform), using the project billing account `biostat-203b-2025-winter`.
-
-```{r}
+#| eval: false
 # connect to the BigQuery database `biostat-203b-2025-mimiciv_3_1`
 con_bq <- dbConnect(
     bigrquery::bigquery(),
-    project = "biostat-203b-2025-winter",
+    project = "biostat-203b-2026-winter",
     dataset = "mimiciv_3_1",
-    billing = "biostat-203b-2025-winter"
+    billing = "biostat-203b-2026-winter"
 )
 con_bq
 ```
@@ -67,6 +61,7 @@ con_bq
 List all tables in the `mimiciv_3_1` database.
 
 ```{r}
+#| eval: false
 dbListTables(con_bq)
 ```
 
@@ -75,6 +70,7 @@ dbListTables(con_bq)
 Connect to the `icustays` table.
 
 ```{r}
+#| eval: false
 # full ICU stays table
 icustays_tble <- tbl(con_bq, "icustays") |>
   arrange(subject_id, hadm_id, stay_id) |>
@@ -142,6 +138,7 @@ Hint: Below is a numerical summary of my tibble after preprocessing:
 Save the final tibble to an R data file `mimic_icu_cohort.rds` in the `mimiciv_shiny` folder.
 
 ```{r}
+#| eval: false
 # make a directory mimiciv_shiny
 if (!dir.exists("mimiciv_shiny")) {
   dir.create("mimiciv_shiny")
@@ -156,6 +153,7 @@ if (exists("mimic_icu_cohort")) {
 Close database connection and clear workspace.
 
 ```{r}
+#| eval: false
 if (exists("con_bq")) {
   dbDisconnect(con_bq)
 }
