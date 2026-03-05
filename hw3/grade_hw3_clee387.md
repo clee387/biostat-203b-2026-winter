@@ -119,9 +119,9 @@
   - status=OK
   - hw3_folder=hw3
   - target_file=hw3.qmd
-  - total_violations=21
+  - total_violations=13
   - deduction=20
-  - v_line80=21
+  - v_line80=13
   - v_infix=0
   - v_comma=0
   - v_paren=0
