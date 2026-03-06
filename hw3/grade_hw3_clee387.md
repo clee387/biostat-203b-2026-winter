@@ -1,5 +1,5 @@
 ### Overall Grade: 
-242/300
+247/300
 
 ### Quality of report: 
 10/10
@@ -102,15 +102,15 @@
   - aux_files_found=3
 
 ### Reproducibility:
-0/10
+5/10
 
 - Note:
   - status=OK
   - hw3_folder=hw3
   - target_file=hw3.qmd
-  - reasons=local_path missing_object_or_file
-  - num_reasons=2
-  - deduction=10
+  - reasons=local_path
+  - num_reasons=1
+  - deduction=5
 
 ### R code style:
 0/20
