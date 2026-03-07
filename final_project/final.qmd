@@ -39,8 +39,475 @@ con_bq
 bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
 ```
 
-## Tables
+## 0. Preliminary Inference
+
+-   Basically why we need to have sepsis as the primary condition upon admission otherwsie we're capturing confounding variable of them developing it there but then have other diagnosFor your research question, you want sepsis to be the PRIMARY reason they were admitted. Here's why:
+
+-   Keep seq_num == 1 (or at least seq_num \<= 3) because:
+
+-   Your question is specifically about admission with sepsis — meaning sepsis is why they came in
+
+-   If a patient came in for a hip fracture and developed sepsis on day 5, their long stay is driven by the fracture + complication, not sepsis on admission — that's a different clinical story
+
+-   Your prediction model would be confounded if you include patients where sepsis wasn't the admitting diagnosis, because you'd be mixing "came in sick with sepsis" vs "got sepsis while here for something else"
+
+-   The nuance though:
+
+    seq_num == 1 strictly = only the single top-coded diagnosis
+
+    In practice, clinicians sometimes list a related condition first (e.g., pneumonia) and sepsis second — so seq_num \<= 3 is a reasonable, commonly used compromise in MIMIC research to capture "sepsis was central to the admission" without being too strict or too loose
+
+```{r}
+#Great idea! Here's the code to pull a real example from your data:
+# ── FIND A REAL PATIENT WITH SEPSIS NOT AS PRIMARY DX ────────
+real_example <- diagnoses_icd_tbl |>
+  inner_join(sepsis_codes_tbl, by = c("icd_code", "icd_version")) |>
+  filter(seq_num > 1) |>        # sepsis is NOT primary
+  select(subject_id, hadm_id) |>
+  head(1) |>                    # grab just one patient
+  collect()
+
+# ── NOW PULL ALL DIAGNOSES FOR THAT PATIENT'S ADMISSION ──────#
+real_example_full <- diagnoses_icd_tbl |>
+  filter(
+    subject_id == !!real_example$subject_id,
+    hadm_id    == !!real_example$hadm_id
+  ) |>
+  inner_join(d_icd_diagnoses_tbl, by = c("icd_code", "icd_version")) |>
+  select(subject_id, hadm_id, seq_num, icd_code, long_title) |>
+  arrange(seq_num) |>
+  collect()
+
+cat("=== All diagnoses for one patient where sepsis was NOT primary ===\n")
+print(real_example_full, n = 20)
+
+```
+
+## 1. Filtering out Age (\>=18) & Primary Sepsis Diagnosis (upon admission)
+
+```{r}
+# ── 1. LOAD RAW TABLES ────────────────────────────────────────
+diagnoses_icd_tbl <- tbl(con_bq, "diagnoses_icd") |>
+  arrange(subject_id, hadm_id)
+
+d_icd_diagnoses_tbl <- tbl(con_bq, "d_icd_diagnoses")
+
+patients_tbl <- tbl(con_bq, "patients") |>
+  select(subject_id, anchor_age, gender)
+
+# ── 2. GET ALL SEPSIS ICD CODES FROM LOOKUP TABLE ────────────
+sepsis_codes_tbl <- d_icd_diagnoses_tbl |>
+  filter(sql("LOWER(long_title) LIKE '%sepsis%'")) |>
+  select(icd_code, icd_version, long_title)
+
+# Preview matched codes
+cat("=== Matched Sepsis ICD Codes ===\n")
+sepsis_codes_tbl |> collect() |> print(n = 50)
+
+# ── 3. GET PATIENTS WITH SEPSIS AS PRIMARY DIAGNOSIS ─────────
+sepsis_cohort_tbl <- diagnoses_icd_tbl |>
+  filter(seq_num == 1) |>
+  inner_join(sepsis_codes_tbl, by = c("icd_code", "icd_version")) |>
+  select(subject_id, hadm_id, seq_num, icd_code, icd_version, long_title)
+
+# ── 4. FILTER AGE >= 18 ───────────────────────────────────────
+adults_tbl <- patients_tbl |>
+  filter(anchor_age >= 18)
+
+# ── 5. JOIN SEPSIS + AGE FILTER ──────────────────────────────
+sepsis_adult_cohort_tbl <- sepsis_cohort_tbl |>
+  inner_join(adults_tbl, by = "subject_id")
+
+# ── 6. COLLECT & SUMMARISE ───────────────────────────────────
+cohort_df <- sepsis_adult_cohort_tbl |> collect()
+
+cat("\n=== Final Sepsis Adult Cohort (age >= 18, sepsis primary dx) ===\n")
+cat("Total admissions: ", nrow(cohort_df), "\n")
+cat("Unique patients:  ", n_distinct(cohort_df$subject_id), "\n")
+
+cat("\n--- Age Summary ---\n")
+print(summary(cohort_df$anchor_age))
+
+cat("\n--- Top ICD Codes ---\n")
+cohort_df |>
+  count(icd_code, icd_version, long_title, sort = TRUE) |>
+  print(n = 20)
+
+
+```
+
+## 2. Outcome Variable
+
+Outcome (**admissions.csv**)
+
+-   Prolonged hospital stay([\<]{.underline}14)
+
+    -   length of stay (dischtime - admittime)
+
+    -   Median LOS of 7 days is expected and clinically realistic — sepsis patients who respond well to early antibiotics and supportive care are typically stabilized and discharged within a week
+
+    -   The median does not need to match the 14-day outcome threshold — these are two different things. The median describes where the middle of your data falls, while the 14-day cutoff is simply the clinical definition you are using to split patients into "prolonged" vs "not prolonged"
+
+    -   24.8% prolonged stay means roughly 1 in 4 sepsis patients stayed ≥14 days, which aligns with real-world sepsis literature where a subset of patients develop complications, require ICU care, or have slower recovery
+
+    -   A right-skewed LOS distribution is normal in sepsis cohorts — the majority of patients cluster at shorter stays (pulling the median down to 7), while a smaller group of complex patients have very long stays that pull the mean up
+
+    -   If the median were at or above 14 days, that would be a red flag suggesting the cohort is capturing a sicker-than-expected population, possible data errors in timestamps, or that the inclusion criteria are too narrow and missing milder cases
+
+    -   The 2,231 patients with prolonged stays are the minority but likely represent the highest-acuity cases — these are clinically the most important group to study, which is exactly why using ≥14 days as your outcome is a meaningful research question
+
+-   You dropped two groups of patients:
+
+    -   !is.na(los_days) — patients where discharge time was missing, meaning they may still be admitted or the record was incomplete
+
+    -   los_days \> 0 — patients who were discharged the same day they were admitted (LOS = 0), meaning they came in and left within the same calendar day
+
+    These are both correct and expected drops — you don't want them because:
+
+    A patient with no discharge time has no outcome you can measure
+
+    A 0-day stay is likely an ED visit, data error, or transfer — not a real inpatient sepsis admission
+
+```{r}
+# ── 7. PULL ADMISSIONS & CREATE OUTCOME VARIABLE ─────────────
+admissions_tbl <- tbl(con_bq, "admissions") |>
+  select(subject_id, hadm_id, admittime, dischtime) |>
+  mutate(los_days = sql("TIMESTAMP_DIFF(dischtime, admittime, DAY)")) |>
+  collect()
+
+# ── 8. JOIN ONTO COHORT + CREATE OUTCOME ─────────────────────
+sepsis_with_outcome <- cohort_df |>
+  inner_join(admissions_tbl, by = c("subject_id", "hadm_id")) |>
+  filter(!is.na(los_days), los_days > 0) |>
+  mutate(prolonged_stay = if_else(los_days >= 14, 1L, 0L))
+
+# ── 9. SUMMARY ───────────────────────────────────────────────
+cat("\n=== Outcome Variable Summary ===\n")
+cat("Total admissions:       ", nrow(sepsis_with_outcome), "\n")
+cat("Unique patients:        ", n_distinct(sepsis_with_outcome$subject_id), "\n")
+cat("Prolonged stay (>=14d): ", sum(sepsis_with_outcome$prolonged_stay), "\n")
+cat("% prolonged:            ", round(mean(sepsis_with_outcome$prolonged_stay)*100, 1), "%\n")
+cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
+```
+
+Predictors
+
+-   Demographics (**patients.csv, admissions.csv**)
+
+    -   gender, anchor_age (age at admission), race
+
+-   Comorbidities (**diagnoses_icd.csv,** **d_icd_diagnoses.csv**)
+
+    -   icd_code (International Classification of Diseases)
+
+-   Vital Signs and Lab Results (**labevents.csv**, **d_labitems.csv**)
+
+    -   itemid, valuenum
+
+```{r}
+# ── BLOCK 1: DEMOGRAPHICS ────────────────────────────────────
+# patients.csv + admissions.csv
+# No time restriction — static at admission
+
+demographics_tbl <- tbl(con_bq, "patients") |>
+  select(subject_id, anchor_age, gender) |>
+  inner_join(
+    tbl(con_bq, "admissions") |>
+      select(subject_id, hadm_id, admittime, race),
+    by = "subject_id"
+  ) |>
+  collect()
+
+sepsis_with_demo <- sepsis_with_outcome |>
+  inner_join(demographics_tbl, by = c("subject_id", "hadm_id"))
+
+cat("=== Block 1: Demographics ===\n")
+cat("Rows after joining demographics: ", nrow(sepsis_with_demo), "\n")
+glimpse(sepsis_with_demo)
+```
+
+```{r}
+# BLOCK 2: COMORBIDITIES
+# From secondary diagnoses (seq_num > 1) — ICD-10 only
+# ════════════════════════════════════════════════════════════
+
+secondary_dx <- tbl(con_bq, "diagnoses_icd") |>
+  filter(
+    seq_num > 1,
+    icd_version == 10,
+    hadm_id %in% !!cohort_ids
+  ) |>
+  select(subject_id, hadm_id, icd_code) |>
+  collect()
+
+comorbidity_flags <- secondary_dx |>
+  mutate(
+    # Hypertension
+    hypertension      = if_else(startsWith(icd_code, "I10"), 1L, 0L),
+
+    # Diabetes (type 1 + type 2)
+    diabetes          = if_else(
+                          startsWith(icd_code, "E10") |
+                          startsWith(icd_code, "E11"), 1L, 0L),
+
+    # Chronic kidney disease (all stages N18.1–N18.6)
+    ckd               = if_else(startsWith(icd_code, "N18"), 1L, 0L),
+
+    # Cardiovascular disease (CAD, MI, afib, atherosclerosis, heart failure)
+    cvd               = if_else(
+                          startsWith(icd_code, "I20") |  # angina
+                          startsWith(icd_code, "I21") |  # acute MI
+                          startsWith(icd_code, "I25") |  # chronic ischaemic HD
+                          startsWith(icd_code, "I48") |  # atrial fibrillation
+                          startsWith(icd_code, "I50") |  # heart failure
+                          startsWith(icd_code, "I70") |  # atherosclerosis
+                          startsWith(icd_code, "I71"),   # aortic aneurysm
+                          1L, 0L),
+
+    # Chronic liver disease (fibrosis, cirrhosis, hepatitis)
+    chronic_liver     = if_else(
+                          startsWith(icd_code, "K70") |  # alcoholic liver disease
+                          startsWith(icd_code, "K73") |  # chronic hepatitis
+                          startsWith(icd_code, "K74"),   # fibrosis/cirrhosis
+                          1L, 0L),
+
+    # Immunosuppression (transplant, immunodeficiency, haematologic malignancy,
+    #                    long-term immunosuppressant use)
+    immunosuppression = if_else(
+                          startsWith(icd_code, "D80") |  # primary immunodeficiency
+                          startsWith(icd_code, "D81") |
+                          startsWith(icd_code, "D83") |
+                          startsWith(icd_code, "Z79") |  # long-term drug use (immunosuppressants)
+                          startsWith(icd_code, "Z94") |  # transplant status
+                          startsWith(icd_code, "C81") |  # Hodgkin lymphoma
+                          startsWith(icd_code, "C82") |  # follicular lymphoma
+                          startsWith(icd_code, "C83") |  # non-follicular lymphoma
+                          startsWith(icd_code, "C91") |  # lymphoid leukaemia
+                          startsWith(icd_code, "C92"),   # myeloid leukaemia
+                          1L, 0L)
+  ) |>
+  group_by(subject_id, hadm_id) |>
+  summarise(across(hypertension:immunosuppression, max), .groups = "drop") |>
+  # If patient had no secondary dx, all comorbidities = 0
+  mutate(across(hypertension:immunosuppression, ~replace_na(.x, 0L)))
+
+cat("\n=== Block 2: Comorbidities ===\n")
+cat("Rows: ", nrow(comorbidity_flags), "\n")
+comorbidity_flags |>
+  summarise(across(hypertension:immunosuppression, ~round(mean(.x)*100,1))) |>
+  print()
+
+
+```
+
+```{r}
+ #BLOCK 3: VITAL SIGNS (first 24h of admission)
+# heart rate, SBP, DBP, MAP, respiratory rate, temperature
+# ════════════════════════════════════════════════════════════
+# MIMIC-IV chartevents itemids:
+#   220045 = heart rate
+#   220179 = systolic BP (non-invasive)
+#   220050 = systolic BP (arterial)
+#   220180 = diastolic BP (non-invasive)
+#   220051 = diastolic BP (arterial)
+#   220052 = MAP (arterial)
+#   220181 = MAP (non-invasive)
+#   220210 = respiratory rate
+#   223762 = temperature (celsius)
+
+vitals_raw <- tbl(con_bq, "chartevents") |>
+  filter(
+    itemid %in% c(220045, 220179, 220050, 220180, 220051,
+                  220052, 220181, 220210, 223762),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  collect() |>
+  inner_join(cohort_admissions, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= admittime,
+    charttime <= admittime + hours(24)
+  )
+
+vital_items <- tibble::tibble(
+  itemid     = c(220045,      220179, 220050, 220180, 220051,
+                 220052,        220181,          220210,       223762),
+  vital_name = c("heart_rate", "sbp",  "sbp",  "dbp",  "dbp",
+                 "map",         "map",           "resp_rate",  "temperature")
+)
+
+vitals_summary <- vitals_raw |>
+  left_join(vital_items, by = "itemid") |>
+  group_by(subject_id, hadm_id, vital_name) |>
+  summarise(
+    value = case_when(
+      first(vital_name) == "heart_rate"   ~ max(valuenum),   # highest HR = worst
+      first(vital_name) == "sbp"          ~ min(valuenum),   # lowest SBP = worst
+      first(vital_name) == "dbp"          ~ min(valuenum),   # lowest DBP = worst
+      first(vital_name) == "map"          ~ min(valuenum),   # lowest MAP = worst
+      first(vital_name) == "resp_rate"    ~ max(valuenum),   # highest RR = worst
+      first(vital_name) == "temperature"  ~ max(valuenum),   # highest temp = worst
+    ),
+    .groups = "drop"
+  ) |>
+  pivot_wider(names_from = vital_name, values_from = value)
+
+cat("\n=== Block 3: Vitals ===\n")
+cat("Rows: ", nrow(vitals_summary), "\n")
+vitals_summary |>
+  summarise(across(heart_rate:temperature, ~round(mean(is.na(.x))*100, 1))) |>
+  print()
+
+```
+
+```{r}
+# ── BLOCK 4: VITALS (first 24h of admission) ─────────────────
+
+vitals_raw <- tbl(con_bq, "chartevents") |>
+  filter(
+    itemid %in% c(220045, 220052, 220181),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  collect() |>
+  inner_join(cohort_admissions, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= admittime,
+    charttime <= admittime + lubridate::hours(24)
+  )
+
+vital_items <- tibble::tibble(
+  itemid     = c(220045,      220052,         220181),
+  vital_name = c("heart_rate","map_arterial", "map_noninvasive")
+)
+
+vitals_summary <- vitals_raw |>
+  left_join(vital_items, by = "itemid") |>
+  group_by(subject_id, hadm_id, vital_name) |>
+  summarise(
+    value = if_else(
+      first(vital_name) == "heart_rate",
+      max(valuenum),   # highest HR = worst
+      min(valuenum)    # lowest MAP = worst
+    ),
+    .groups = "drop"
+  ) |>
+  pivot_wider(names_from = vital_name, values_from = value) |>
+  mutate(map = coalesce(map_arterial, map_noninvasive)) |>
+  select(subject_id, hadm_id, heart_rate, map)
+
+```
+
+```{r}
+# BLOCK 4: LAB RESULTS (first 24h of admission)
+# creatinine, bilirubin, WBC, platelets, lactate, CRP
+# ════════════════════════════════════════════════════════════
+# MIMIC-IV labevents itemids:
+#   50912 = creatinine
+#   50885 = bilirubin (total)
+#   51301 = WBC
+#   51265 = platelets
+#   50813 = lactate
+#   CRP   = check d_labitems (varies by institution)
+
+# First confirm CRP itemid in YOUR dataset
+cat("\n--- Checking CRP itemid ---\n")
+tbl(con_bq, "d_labitems") |>
+  filter(sql("LOWER(label) LIKE '%c-reactive%'")) |>
+  collect() |>
+  print()
+
+# Once confirmed, add CRP itemid below (replace 1533 if different)
+crp_itemid <- 1533   # <- UPDATE this if your CRP check returns a different itemid
+
+labs_raw <- tbl(con_bq, "labevents") |>
+  filter(
+    itemid %in% c(50912, 50885, 51301, 51265, 50813, crp_itemid),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  collect() |>
+  inner_join(cohort_admissions, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= admittime,
+    charttime <= admittime + hours(24)
+  )
+
+lab_items <- tibble::tibble(
+  itemid   = c(50912,        50885,       51301,  51265,       50813,     crp_itemid),
+  lab_name = c("creatinine", "bilirubin", "wbc",  "platelets", "lactate", "crp")
+)
+
+labs_summary <- labs_raw |>
+  left_join(lab_items, by = "itemid") |>
+  group_by(subject_id, hadm_id, lab_name) |>
+  summarise(
+    value = case_when(
+      first(lab_name) == "platelets" ~ min(valuenum),  # low platelets = worse
+      TRUE                           ~ max(valuenum)   # high = worse for all others
+    ),
+    .groups = "drop"
+  ) |>
+  pivot_wider(names_from = lab_name, values_from = value)
+
+crp_check <- tbl(con_bq, "d_labitems") |>
+  filter(sql("LOWER(label) LIKE '%c-reactive%'")) |>
+  collect()
+
+print(crp_check)
+
+
+
+```
 
 ```{r}
 
+# ════════════════════════════════════════════════════════════
+# FINAL JOIN — combine all blocks
+# ════════════════════════════════════════════════════════════
+
+sepsis_final <- sepsis_with_outcome |>
+  left_join(demographics_tbl,    by = c("subject_id", "hadm_id")) |>
+  left_join(comorbidity_flags,   by = c("subject_id", "hadm_id")) |>
+  left_join(vitals_summary,      by = c("subject_id", "hadm_id")) |>
+  left_join(labs_summary,        by = c("subject_id", "hadm_id"))
+
+cat("\n=== FINAL COHORT ===\n")
+cat("Rows:    ", nrow(sepsis_final), "\n")
+cat("Columns: ", ncol(sepsis_final), "\n")
+cat("\nAll variables:\n")
+print(names(sepsis_final))
+
+cat("\nMissing data (%):\n")
+sepsis_final |>
+  summarise(across(everything(), ~round(mean(is.na(.x))*100, 1))) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing") |>
+  filter(pct_missing > 0) |>
+  arrange(desc(pct_missing)) |>
+  print()
+
+# ── SAVE ──────────────────────────────────────────────────────
+saveRDS(sepsis_final, "sepsis_final_cohort.rds")
+write.csv(sepsis_final, "sepsis_final_cohort.csv", row.names = FALSE)
+cat("\nSaved: sepsis_final_cohort.rds + sepsis_final_cohort.csv\n")
+
 ```
+
+**Cohort & Predictor Construction — Sepsis Study**
+
+-   Pulled sepsis patients from `diagnoses_icd` by matching ICD codes whose description contained "sepsis" in the `d_icd_diagnoses` lookup table, filtering to `seq_num == 1` to ensure sepsis was the primary admission diagnosis rather than a complication that developed later in the stay.
+
+-   Used `admissions` to calculate length of stay (dischtime - admittime) in days, then created a binary outcome variable where 1 = LOS ≥ 14 days and 0 = LOS \< 14 days. 24.8% of the cohort met this threshold with a median LOS of 7 days, which is clinically expected.
+
+-   Pulled demographics (age, sex, race) from `patients` and `admissions`. These are static at admission so no time filtering was needed.
+
+-   Pulled comorbidities from secondary diagnoses (seq_num \> 1) using ICD-10 prefix matching to flag hypertension, diabetes, chronic kidney disease, cardiovascular disease, chronic liver disease, and immunosuppression. seq_num \> 1 was used specifically to exclude the primary sepsis diagnosis and capture only background conditions present upon admission.
+
+-   Pulled vital signs (heart rate, systolic BP, diastolic BP, MAP, respiratory rate, temperature) from `chartevents`, filtered to the first 24 hours of admission only to avoid data leakage into the outcome window. The worst value per variable within that window was used as it is most clinically predictive of outcomes.
+
+-   Pulled lab results (creatinine, bilirubin, WBC, platelet count, lactate, CRP) from `labevents`, also filtered to the first 24 hours of admission for the same data leakage reason. The worst value in the window was taken for each lab.
+
+-   Hospital admission was used as the index time because the goal is to use day 0 risk factors to predict whether a patient's stay will be prolonged, meaning all predictors must be measured at or shortly after admission before the outcome is known.
