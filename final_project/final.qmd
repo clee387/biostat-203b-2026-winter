@@ -487,29 +487,35 @@ sepsis_clean |>
 
 ```{r}
 # Block 8: Imputation
-sepsis_imputed <- sepsis_clean |>
-    mutate(
-        # Median imputation for low-missingness variables
-        heart_rate  = coalesce(heart_rate,  median(heart_rate,  na.rm = TRUE)),
-        sbp         = coalesce(sbp,         median(sbp,         na.rm = TRUE)),
-        dbp         = coalesce(dbp,         median(dbp,         na.rm = TRUE)),
-        map         = coalesce(map,         median(map,         na.rm = TRUE)),
-        resp_rate   = coalesce(resp_rate,   median(resp_rate,   na.rm = TRUE)),
-        temperature = coalesce(temperature, median(temperature, na.rm = TRUE)),
-        creatinine  = coalesce(creatinine,  median(creatinine,  na.rm = TRUE)),
-        wbc         = coalesce(wbc,         median(wbc,         na.rm = TRUE)),
-        platelets   = coalesce(platelets,   median(platelets,   na.rm = TRUE)),
-        bilirubin = coalesce(bilirubin, median(bilirubin, na.rm = TRUE)),
-        lactate   = coalesce(lactate,   median(lactate,   na.rm = TRUE))
-    )
+sepsis_imputed <- sepsis_clean %>%
 
-sepsis_imputed |>
-     summarise(across(c(heart_rate, sbp, dbp, map, resp_rate, temperature,
+  mutate(
+    heart_rate  = coalesce(heart_rate,  median(heart_rate,  na.rm = TRUE)),
+    sbp         = coalesce(sbp,         median(sbp,         na.rm = TRUE)),
+    dbp         = coalesce(dbp,         median(dbp,         na.rm = TRUE)),
+    map         = coalesce(map,         median(map,         na.rm = TRUE)),
+    resp_rate   = coalesce(resp_rate,   median(resp_rate,   na.rm = TRUE)),
+    temperature = coalesce(temperature, median(temperature, na.rm = TRUE))
+  ) %>%
+  # ----------------------
+  # Labs → maximum per patient
+  # ----------------------
+  group_by(subject_id) %>%
+  mutate(
+    creatinine  = coalesce(creatinine,  max(creatinine, na.rm = TRUE)),
+    bilirubin   = coalesce(bilirubin,   max(bilirubin,  na.rm = TRUE)),
+    wbc         = coalesce(wbc,         max(wbc,      na.rm = TRUE)),
+    platelets   = coalesce(platelets,   max(platelets, na.rm = TRUE)),
+    lactate     = coalesce(lactate,     max(lactate,   na.rm = TRUE))
+  ) %>%
+  ungroup()
+
+#missing percent
+sepsis_imputed %>%
+  summarise(across(c(heart_rate, sbp, dbp, map, resp_rate, temperature,
                      creatinine, bilirubin, wbc, platelets, lactate),
-                   ~round(mean(is.na(.x))*100, 1))) |>
+                   ~ round(mean(is.na(.x)) * 100, 1))) %>%
   print()
-
-
 ```
 
 Final Cohort Check
