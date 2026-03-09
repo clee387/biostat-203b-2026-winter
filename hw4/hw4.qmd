@@ -32,6 +32,8 @@ Load database libraries and the tidyverse frontend:
 #| warning: false
 library(bigrquery)
 library(dbplyr)
+library(RPostgres)
+library(dplyr)
 library(DBI)
 library(gt)
 library(gtsummary)
@@ -190,6 +192,41 @@ Hint: Below is a numerical summary of my tibble after preprocessing:
 
 </iframe>
 
+```{r}
+mimic_icu_cohort <- mimic_icu_cohort %>%
+  mutate(
+    first_careunit     = fct_lump_n(first_careunit, n = 5),
+    last_careunit      = fct_lump_n(last_careunit, n = 5),
+    admission_type     = fct_lump_n(admission_type, n = 4),
+    admission_location = fct_lump_n(admission_location, n = 4),
+    discharge_location = fct_lump_n(discharge_location, n = 4),
+    race = fct_collapse(race,
+      ASIAN    = c("ASIAN", "ASIAN - ASIAN INDIAN", "ASIAN - CHINESE",
+                   "ASIAN - KOREAN", "ASIAN - SOUTH EAST ASIAN"),
+      BLACK    = c("BLACK/AFRICAN", "BLACK/AFRICAN AMERICAN",
+                   "BLACK/CAPE VERDEAN", "BLACK/CARIBBEAN ISLAND"),
+      HISPANIC = c("HISPANIC OR LATINO", "HISPANIC/LATINO - CENTRAL AMERICAN",
+                   "HISPANIC/LATINO - COLUMBIAN", "HISPANIC/LATINO - CUBAN",
+                   "HISPANIC/LATINO - DOMINICAN", "HISPANIC/LATINO - GUATEMALAN",
+                   "HISPANIC/LATINO - HONDURAN", "HISPANIC/LATINO - MEXICAN",
+                   "HISPANIC/LATINO - PUERTO RICAN", "HISPANIC/LATINO - SALVADORAN"),
+      WHITE    = c("WHITE", "WHITE - BRAZILIAN", "WHITE - EASTERN EUROPEAN",
+                   "WHITE - OTHER EUROPEAN", "WHITE - RUSSIAN"),
+      other_level = "Other"
+    ),
+    los_long = los >= 2
+  )
+
+mimic_icu_cohort %>%
+  select(first_careunit, last_careunit, los, admission_type, admission_location,
+         discharge_location, race, gender, age_intime, los_long,
+         heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate,
+         albumin, bicarbonate, chloride, creatinine, glucose,
+         hematocrit, potassium, sodium, wbc) %>%
+  tbl_summary(by = los_long)
+
+```
+
 ### Q1.9 Save the final tibble
 
 Save the final tibble to an R data file `mimic_icu_cohort.rds` in the `mimiciv_shiny` folder.
@@ -217,7 +254,7 @@ if (exists("con_bq")) {
 rm(list = ls())
 ```
 
-Although it is not a good practice to add big data files to Git, for grading purpose, please add `mimic_icu_cohort.rds` to your Git repository.
+**Although it is not a good practice to add big data files to Git, for grading purpose, please add `mimic_icu_cohort.rds` to your Git repository.**
 
 ## Q2. Shiny app
 
