@@ -38,6 +38,11 @@ library(DBI)
 library(gt)
 library(gtsummary)
 library(tidyverse)
+library(styler)
+
+
+# Style the current file you're editing
+style_file("hw4.qmd")
 ```
 
 ## Q1. Compile the ICU cohort in HW3 from the Google BigQuery database
@@ -51,10 +56,10 @@ Below is an outline of steps. In this homework, we exclusively work with the Big
 ```{r}
 # connect to the BigQuery database `biostat-203b-2025-mimiciv_3_1`
 con_bq <- dbConnect(
-    bigrquery::bigquery(),
-    project = "biostat-203b-2025-winter",
-    dataset = "mimiciv_3_1",
-    billing = "biostat-203b-2025-winter"
+  bigrquery::bigquery(),
+  project = "biostat-203b-2025-winter",
+  dataset = "mimiciv_3_1",
+  billing = "biostat-203b-2025-winter"
 )
 con_bq
 bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
@@ -64,7 +69,6 @@ List all tables in the `mimiciv_3_1` database.
 
 ```{r}
 dbListTables(con_bq)
-
 ```
 
 ### Q1.2 `icustays` data
@@ -97,11 +101,10 @@ Connect to the `patients` table.
 
 ```{r}
 # # TODO
-patients_tble <-tbl(con_bq, "patients") |>
+patients_tble <- tbl(con_bq, "patients") |>
   arrange(subject_id, gender, anchor_age) |>
   # show_query() |>
   print(width = Inf)
-  
 ```
 
 ### Q1.5 `labevents` data
@@ -193,38 +196,48 @@ Hint: Below is a numerical summary of my tibble after preprocessing:
 </iframe>
 
 ```{r}
+#| eval: true
 mimic_icu_cohort <- mimic_icu_cohort %>%
   mutate(
-    first_careunit     = fct_lump_n(first_careunit, n = 5),
-    last_careunit      = fct_lump_n(last_careunit, n = 5),
-    admission_type     = fct_lump_n(admission_type, n = 4),
+    first_careunit = fct_lump_n(first_careunit, n = 5),
+    last_careunit = fct_lump_n(last_careunit, n = 5),
+    admission_type = fct_lump_n(admission_type, n = 4),
     admission_location = fct_lump_n(admission_location, n = 4),
     discharge_location = fct_lump_n(discharge_location, n = 4),
     race = fct_collapse(race,
-      ASIAN    = c("ASIAN", "ASIAN - ASIAN INDIAN", "ASIAN - CHINESE",
-                   "ASIAN - KOREAN", "ASIAN - SOUTH EAST ASIAN"),
-      BLACK    = c("BLACK/AFRICAN", "BLACK/AFRICAN AMERICAN",
-                   "BLACK/CAPE VERDEAN", "BLACK/CARIBBEAN ISLAND"),
-      HISPANIC = c("HISPANIC OR LATINO", "HISPANIC/LATINO - CENTRAL AMERICAN",
-                   "HISPANIC/LATINO - COLUMBIAN", "HISPANIC/LATINO - CUBAN",
-                   "HISPANIC/LATINO - DOMINICAN", "HISPANIC/LATINO - GUATEMALAN",
-                   "HISPANIC/LATINO - HONDURAN", "HISPANIC/LATINO - MEXICAN",
-                   "HISPANIC/LATINO - PUERTO RICAN", "HISPANIC/LATINO - SALVADORAN"),
-      WHITE    = c("WHITE", "WHITE - BRAZILIAN", "WHITE - EASTERN EUROPEAN",
-                   "WHITE - OTHER EUROPEAN", "WHITE - RUSSIAN"),
+      ASIAN = c(
+        "ASIAN", "ASIAN - ASIAN INDIAN", "ASIAN - CHINESE",
+        "ASIAN - KOREAN", "ASIAN - SOUTH EAST ASIAN"
+      ),
+      BLACK = c(
+        "BLACK/AFRICAN", "BLACK/AFRICAN AMERICAN",
+        "BLACK/CAPE VERDEAN", "BLACK/CARIBBEAN ISLAND"
+      ),
+      HISPANIC = c(
+        "HISPANIC OR LATINO", "HISPANIC/LATINO - CENTRAL AMERICAN",
+        "HISPANIC/LATINO - COLUMBIAN", "HISPANIC/LATINO - CUBAN",
+        "HISPANIC/LATINO - DOMINICAN", "HISPANIC/LATINO - GUATEMALAN",
+        "HISPANIC/LATINO - HONDURAN", "HISPANIC/LATINO - MEXICAN",
+        "HISPANIC/LATINO - PUERTO RICAN", "HISPANIC/LATINO - SALVADORAN"
+      ),
+      WHITE = c(
+        "WHITE", "WHITE - BRAZILIAN", "WHITE - EASTERN EUROPEAN",
+        "WHITE - OTHER EUROPEAN", "WHITE - RUSSIAN"
+      ),
       other_level = "Other"
     ),
     los_long = los >= 2
   )
 
 mimic_icu_cohort %>%
-  select(first_careunit, last_careunit, los, admission_type, admission_location,
-         discharge_location, race, gender, age_intime, los_long,
-         heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate,
-         albumin, bicarbonate, chloride, creatinine, glucose,
-         hematocrit, potassium, sodium, wbc) %>%
+  select(
+    first_careunit, last_careunit, los, admission_type, admission_location,
+    discharge_location, race, gender, age_intime, los_long,
+    heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate,
+    albumin, bicarbonate, chloride, creatinine, glucose,
+    hematocrit, potassium, sodium, wbc
+  ) %>%
   tbl_summary(by = los_long)
-
 ```
 
 ### Q1.9 Save the final tibble
@@ -232,7 +245,6 @@ mimic_icu_cohort %>%
 Save the final tibble to an R data file `mimic_icu_cohort.rds` in the `mimiciv_shiny` folder.
 
 ```{r}
-#| eval: false
 # make a directory mimiciv_shiny
 if (!dir.exists("mimiciv_shiny")) {
   dir.create("mimiciv_shiny")
@@ -247,7 +259,6 @@ if (exists("mimic_icu_cohort")) {
 Close database connection and clear workspace.
 
 ```{r}
-#| eval: false
 if (exists("con_bq")) {
   dbDisconnect(con_bq)
 }
