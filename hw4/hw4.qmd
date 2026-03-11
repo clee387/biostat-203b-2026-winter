@@ -39,10 +39,11 @@ library(gt)
 library(gtsummary)
 library(tidyverse)
 library(styler)
+library(shiny)
 
 
-# Style the current file you're editing
-style_file("hw4.qmd")
+# Style my current file 
+style_file("hw4/hw4.qmd")
 ```
 
 ## Q1. Compile the ICU cohort in HW3 from the Google BigQuery database
@@ -229,6 +230,7 @@ mimic_icu_cohort <- mimic_icu_cohort %>%
     los_long = los >= 2
   )
 
+# displaying the table (not saving anywhere)
 mimic_icu_cohort %>%
   select(
     first_careunit, last_careunit, los, admission_type, admission_location,
@@ -270,6 +272,13 @@ rm(list = ls())
 ## Q2. Shiny app
 
 Develop a Shiny app for exploring the ICU cohort data created in Q1. The app should reside in the `mimiciv_shiny` folder. The app should contain at least two tabs. One tab provides easy access to the graphical and numerical summaries of variables (demographics, lab measurements, vitals) in the ICU cohort, using the `mimic_icu_cohort.rds` you curated in Q1. The other tab allows user to choose a specific patient in the cohort and display the patient's ADT and ICU stay information as we did in Q1 of HW3, by dynamically retrieving the patient's ADT and ICU stay information from BigQuery database. Again, do **not** ever add the BigQuery token to your Git repository. If you do so, you will lose 50 points.
+
+```{r}
+# Load the preprocessed cohort data
+mimic_icu_cohort <- read_rds("mimic_icu_cohort.rds")
+
+
+```
 
 ## Q3. AI assistant
 
