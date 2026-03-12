@@ -41,7 +41,8 @@ library(tidyverse)
 library(styler)
 library(shiny)
 
-
+# Style my current file
+styler::style_file("hw4/hw4.qmd")
 ```
 
 ## Q1. Compile the ICU cohort in HW3 from the Google BigQuery database
@@ -61,7 +62,7 @@ con_bq <- dbConnect(
   billing = "biostat-203b-2025-winter"
 )
 con_bq
-bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
+bq_auth(path = "hw4/biostat-203b-2026-winter-92fefbfab477.json")
 ```
 
 List all tables in the `mimiciv_3_1` database.
@@ -113,9 +114,15 @@ Connect to the `labevents` table and retrieve a subset that only contain subject
 ```{r}
 # # TODO
 labevents_tble <- tbl(con_bq, "labevents") %>%
-  filter(itemid %in% c(50862, 50912, 50971, 50983, 50902, 50882, 51221, 51301, 50931)) %>%
+  filter(itemid %in% c(
+    50862, 50912, 50971, 50983,
+    50902, 50882, 51221, 51301, 50931
+  )) %>%
   semi_join(icustays_tble, by = "subject_id") %>%
-  left_join(icustays_tble %>% select(subject_id, intime), by = "subject_id") %>%
+  left_join(
+    icustays_tble %>% select(subject_id, stay_id, intime, outtime),
+    by = c("subject_id", "stay_id")
+  ) %>%
   filter(storetime < intime) %>%
   group_by(subject_id, itemid) %>%
   slice_max(storetime, n = 1) %>%
@@ -135,7 +142,10 @@ Connect to `chartevents` table and retrieve a subset that only contain subjects 
 chartevents_tble <- tbl(con_bq, "chartevents") %>%
   filter(itemid %in% c(220045, 220179, 220180, 223761, 220210)) %>%
   semi_join(icustays_tble, by = "subject_id") %>%
-  left_join(icustays_tble %>% select(subject_id, stay_id, intime, outtime), by = c("subject_id", "stay_id")) %>%
+  left_join(
+    icustays_tble %>% select(subject_id, stay_id, intime, outtime),
+    by = c("subject_id", "stay_id")
+  ) %>%
   filter(storetime >= intime, storetime <= outtime) %>%
   group_by(subject_id, stay_id, itemid) %>%
   filter(storetime == min(storetime, na.rm = TRUE)) %>%
@@ -269,14 +279,8 @@ rm(list = ls())
 Develop a Shiny app for exploring the ICU cohort data created in Q1. The app should reside in the `mimiciv_shiny` folder. The app should contain at least two tabs. One tab provides easy access to the graphical and numerical summaries of variables (demographics, lab measurements, vitals) in the ICU cohort, using the `mimic_icu_cohort.rds` you curated in Q1. The other tab allows user to choose a specific patient in the cohort and display the patient's ADT and ICU stay information as we did in Q1 of HW3, by dynamically retrieving the patient's ADT and ICU stay information from BigQuery database. Again, do **not** ever add the BigQuery token to your Git repository. If you do so, you will lose 50 points.
 
 ```{r}
-start_time <- Sys.time()
-shiny::runApp("hw4/mimiciv_shiny/app.R", launch.browser = TRUE)
-```
-
-```{r}
-
-# Style my current file 
-style_file("hw4/hw4.qmd")
+#| eval: false
+shiny::runApp("mimiciv_shiny", launch.browser = TRUE)
 ```
 
 ## Q3. AI assistant
@@ -284,3 +288,11 @@ style_file("hw4/hw4.qmd")
 Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity?
 
 Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
+
+1.  I reported that the ADT plot was showing nothing. Claude had used scale_linewidth_manual(values = c("FALSE" = 0.7, "TRUE" = 2.5)) with string keys on a logical column, causing a silent crash with no error message.![](images/Screenshot%202026-03-11%20at%2011.30.15%20PM.png)
+2.  I reported that my entire Cohort Summary tab stopped working after Claude added the Patient Explorer. Claude had placed bq_auth() at the top level of the server function, crashing the whole app on startup before any tab could load.![](images/Screenshot%202026-03-11%20at%2011.32.08%20PM.png)
+3.  I asked Claude to fix my checkboxes. Claude defined output\$dist_checkboxes three times in the same server — Shiny only runs the last one, which had a broken selected argument that crashed the whole tab.![](images/Screenshot%202026-03-11%20at%2011.33.52%20PM.png)
+4.  I reported that selecting multiple variables gave broken axes and overlapping legends. Claude had used Plotly's subplot() which merges everything into one figure with shared axes, which was the wrong approach entirely.![](images/Screenshot%202026-03-11%20at%2011.34.25%20PM.png)
+5.  I reported BIGQUERY_KEY not set errors. Claude had me set up .env files, dotenv, and readRenviron() across multiple failed attempts, when the simple bq_auth(path = "key.json") + dbConnect() I was already using in HW3 was all that was needed.
+
+![](images/Screenshot%202026-03-11%20at%2011.35.04%20PM.png)
