@@ -13,3 +13,6 @@ hw3/chartevents_pq/
 *.html
 *.png
 *.DS_Store
+*.json
+chartevents_pq
+biostat-20b-2026-winter.Rproj
