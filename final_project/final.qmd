@@ -1,0 +1,641 @@
+---
+title: "Biostat Final Project"
+subtitle: "Due Mar 18 @ 11:59PM"
+author: "Charlotte Lee and 206782165"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+---
+
+## Load Libraries
+
+```{r}
+#| message: false
+#| warning: false
+library(bigrquery)
+library(dbplyr)
+library(DBI)
+library(gt)
+library(gtsummary)
+library(tidyverse)
+library(glmnet)
+library(pROC)
+library(corrplot)
+```
+
+## Connect to The Data
+
+```{r}
+con_bq <- dbConnect(
+    bigrquery::bigquery(),
+    project = "biostat-203b-2025-winter",
+    dataset = "mimiciv_3_1",
+    billing = "biostat-203b-2025-winter"
+)
+con_bq
+bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
+```
+
+# Data Cleaning + Pre-Processing
+
+## 1. Filtering out Age (\>=18) & Primary Sepsis Diagnosis (upon admission)
+
+```{r}
+# load raw tables
+diagnoses_icd_tbl <- tbl(con_bq, "diagnoses_icd") |>
+  arrange(subject_id, hadm_id)
+
+d_icd_diagnoses_tbl <- tbl(con_bq, "d_icd_diagnoses")
+
+patients_tbl <- tbl(con_bq, "patients") |>
+  select(subject_id, anchor_age, gender)
+
+# match sepsis icd codes from lookup
+sepsis_codes_tbl <- d_icd_diagnoses_tbl |>
+  filter(sql("LOWER(long_title) LIKE '%sepsis%'")) |>
+  select(icd_code, icd_version, long_title)
+
+sepsis_codes_tbl |> collect() |> print(n = 50)
+
+# keep only primary diagnosis (seq_num == 1)
+sepsis_cohort_tbl <- diagnoses_icd_tbl |>
+  filter(seq_num == 1) |>
+  inner_join(sepsis_codes_tbl, by = c("icd_code", "icd_version")) |>
+  select(subject_id, hadm_id, seq_num, icd_code, icd_version, long_title)
+
+# filter adults only
+adults_tbl <- patients_tbl |>
+  filter(anchor_age >= 18)
+
+sepsis_adult_cohort_tbl <- sepsis_cohort_tbl |>
+  inner_join(adults_tbl, by = "subject_id")
+
+cohort_df <- sepsis_adult_cohort_tbl |> collect()
+
+cat("Total admissions: ", nrow(cohort_df), "\n")
+cat("Unique patients:  ", n_distinct(cohort_df$subject_id), "\n")
+print(summary(cohort_df$anchor_age))
+
+cohort_df |>
+  count(icd_code, icd_version, long_title, sort = TRUE) |>
+  print(n = 5)
+
+
+# check:
+cat("Total admissions: ", nrow(cohort_df), "\n")
+cat("Unique patients:  ", n_distinct(cohort_df$subject_id), "\n")
+
+cat("\n--- Age Summary ---\n")
+print(summary(cohort_df$anchor_age))
+
+```
+
+## 2. Outcome Variable
+
+Outcome (**admissions.csv**)
+
+```{r}
+# pull admissions and calculate LOS
+admissions_tbl <- tbl(con_bq, "admissions") |>
+  select(subject_id, hadm_id, admittime, dischtime) |>
+  mutate(los_days = sql("TIMESTAMP_DIFF(dischtime, admittime, DAY)")) |>
+  collect()
+
+# join onto cohort and create outcome variable (prolonged stay >= 14 days)
+sepsis_with_outcome <- cohort_df |>
+  inner_join(admissions_tbl, by = c("subject_id", "hadm_id")) |>
+  filter(!is.na(los_days), los_days > 0) |>
+  mutate(prolonged_stay = if_else(los_days >= 14, 1L, 0L))
+
+# check:
+cat("Total admissions:       ", nrow(sepsis_with_outcome), "\n")
+cat("Unique patients:        ", n_distinct(sepsis_with_outcome$subject_id), "\n")
+cat("Prolonged stay (>=14d): ", sum(sepsis_with_outcome$prolonged_stay), "\n")
+cat("% prolonged:            ", round(mean(sepsis_with_outcome$prolonged_stay)*100, 1), "%\n")
+cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
+
+```
+
+## 3. Adding Predictors
+
+### 3.1 Demographics
+
+```{r}
+# add race from admissions (anchor_age & gender already in cohort_df)
+demographics_tbl <- tbl(con_bq, "admissions") |>
+  select(subject_id, hadm_id, race) |>
+  collect()
+
+sepsis_with_demo <- sepsis_with_outcome |>
+  inner_join(demographics_tbl, by = c("subject_id", "hadm_id"))
+
+# check:
+cat("Rows after joining demographics: ", nrow(sepsis_with_demo), "\n")
+glimpse(sepsis_with_demo)
+```
+
+### 3.2 Comorbidities
+
+```{r}
+cohort_ids <- sepsis_with_demo$hadm_id
+
+# pull secondary diagnoses and flag comorbidities using ICD-10 codes
+secondary_dx <- tbl(con_bq, "diagnoses_icd") |>
+  filter(
+    seq_num > 1,
+    icd_version == 10,
+    hadm_id %in% !!cohort_ids
+  ) |>
+  select(subject_id, hadm_id, icd_code) |>
+  collect()
+
+comorbidity_flags <- secondary_dx |>
+  mutate(
+    hypertension      = if_else(startsWith(icd_code, "I10"), 1L, 0L),
+    diabetes          = if_else(
+                          startsWith(icd_code, "E10") |
+                          startsWith(icd_code, "E11"), 1L, 0L),
+    ckd               = if_else(startsWith(icd_code, "N18"), 1L, 0L),
+    cvd               = if_else(
+                          startsWith(icd_code, "I20") |
+                          startsWith(icd_code, "I21") |
+                          startsWith(icd_code, "I25") |
+                          startsWith(icd_code, "I48") |
+                          startsWith(icd_code, "I50") |
+                          startsWith(icd_code, "I70") |
+                          startsWith(icd_code, "I71"), 1L, 0L),
+    chronic_liver     = if_else(
+                          startsWith(icd_code, "K70") |
+                          startsWith(icd_code, "K73") |
+                          startsWith(icd_code, "K74"), 1L, 0L),
+    immunosuppression = if_else(
+                          startsWith(icd_code, "D80") |
+                          startsWith(icd_code, "D81") |
+                          startsWith(icd_code, "D83") |
+                          startsWith(icd_code, "Z79") |
+                          startsWith(icd_code, "Z94") |
+                          startsWith(icd_code, "C81") |
+                          startsWith(icd_code, "C82") |
+                          startsWith(icd_code, "C83") |
+                          startsWith(icd_code, "C91") |
+                          startsWith(icd_code, "C92"), 1L, 0L)
+  ) |>
+  group_by(subject_id, hadm_id) |>
+  summarise(across(hypertension:immunosuppression, max), .groups = "drop") |>
+  mutate(across(hypertension:immunosuppression, ~replace_na(.x, 0L)))
+
+sepsis_with_comorbidities <- sepsis_with_demo |>
+  left_join(comorbidity_flags, by = c("subject_id", "hadm_id")) |>
+  mutate(across(hypertension:immunosuppression, ~replace_na(.x, 0L)))
+
+# check:
+cat("Rows after joining comorbidities: ", nrow(sepsis_with_comorbidities), "\n")
+comorbidity_flags |>
+  summarise(across(hypertension:immunosuppression, ~round(mean(.x)*100,1))) |>
+  print()
+dim(sepsis_with_comorbidities)
+
+```
+
+### 3.3 Comorbidities
+
+```{r}
+# safety step: ensure we pull right admissions
+cohort_ids <- sepsis_with_comorbidities$hadm_id
+
+# pull earliest ICU admission time per stay
+icustays_raw <- tbl(con_bq, "icustays") |>
+  filter(hadm_id %in% !!cohort_ids) |>
+  select(subject_id, hadm_id, intime) |>
+  collect() |>
+  group_by(subject_id, hadm_id) |>
+  slice_min(intime, n = 1) |>
+  ungroup()
+
+#check
+cat("ICU stays pulled:", nrow(icustays_raw), "\n")
+
+# slimmed down for joining into vitals & labs
+icu_admissions <- icustays_raw |>
+  select(subject_id, hadm_id, intime)
+```
+
+### 3.4 Vital Items
+
+```{r}
+# pull vitals from chartevents within first 24h of ICU admission
+# itemid 223761 is fahrenheit so converting to celsius
+vitals_raw <- tbl(con_bq, "chartevents") |>
+  filter(
+    itemid %in% c(220045, 220179, 220050, 220180, 220051,
+                  220052, 220181, 220210, 223762, 223761),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  collect() |>
+  inner_join(icu_admissions, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= intime,
+    charttime <= intime + lubridate::hours(24)
+  ) |>
+  mutate(
+    valuenum = if_else(itemid == 223761, (valuenum - 32) * 5/9, valuenum)
+  )
+
+# map itemids to vital names (some vitals have multiple itemids)
+vital_items <- tibble::tibble(
+  itemid     = c(220045, 220179, 220050, 220180, 220051,
+                 220052, 220181, 220210, 223762, 223761),
+  vital_name = c("heart_rate", "sbp",  "sbp",  "dbp",  "dbp",
+                 "map",  "map",  "resp_rate", "temperature", "temperature")
+)
+
+# summarise each vital per admission (worst values)
+vitals_summary <- vitals_raw |>
+  left_join(vital_items, by = "itemid") |>
+  group_by(subject_id, hadm_id, vital_name) |>
+  summarise(
+    value = case_when(
+      first(vital_name) == "heart_rate"  ~ max(valuenum),
+      first(vital_name) == "sbp"         ~ min(valuenum),
+      first(vital_name) == "dbp"         ~ min(valuenum),
+      first(vital_name) == "map"         ~ min(valuenum),
+      first(vital_name) == "resp_rate"   ~ max(valuenum),
+      first(vital_name) == "temperature" ~ max(valuenum),
+    ),
+    .groups = "drop"
+  ) |>
+  pivot_wider(names_from = vital_name, values_from = value)
+
+# check
+cat("Rows after joining vitals:", nrow(vitals_summary), "\n")
+
+# may take up to a minute to run
+```
+
+### 3.5 Lab Events
+
+```{r}
+#Confirm Lab Items: 
+# verify all lab itemids are correct
+#tbl(con_bq, "d_labitems") |>
+ # filter(itemid %in% c(50912, 50885, 51301, 51265, 50813)) |>
+#  select(itemid, label) |>
+#  arrange(itemid) |>
+#  collect() |>
+#  print()
+
+# pull labs from labevents within first 24h of ICU admission
+labs_raw <- tbl(con_bq, "labevents") |>
+  filter(
+    itemid %in% c(50912, 50885, 51301, 51265, 50813),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  collect() |>
+  inner_join(icu_admissions, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= intime,
+    charttime <= intime + lubridate::hours(24)
+  )
+
+# map itemids to lab names
+lab_items <- tibble::tibble(
+  itemid   = c(50912,        50885,       51301,  51265,       50813),
+  lab_name = c("creatinine", "bilirubin", "wbc",  "platelets", "lactate")
+)
+
+# worst values per admission
+labs_summary <- labs_raw |>
+  left_join(lab_items, by = "itemid") |>
+  group_by(subject_id, hadm_id, lab_name) |>
+  summarise(
+    value = case_when(
+      first(lab_name) == "creatinine" ~ max(valuenum),
+      first(lab_name) == "bilirubin"  ~ max(valuenum),
+      first(lab_name) == "wbc"        ~ max(valuenum),
+      first(lab_name) == "platelets"  ~ min(valuenum),
+      first(lab_name) == "lactate"    ~ max(valuenum),
+    ),
+    .groups = "drop"
+  ) |>
+  pivot_wider(names_from = lab_name, values_from = value)
+
+# check
+cat("Rows after joining labs:", nrow(labs_summary), "\n")
+```
+
+### 3.6 Subset to CU Patients only
+
+```{r}
+# restrict to ICU patients only then join vitals and labs
+sepsis_icu <- sepsis_with_comorbidities |>
+  filter(hadm_id %in% icustays_raw$hadm_id)
+
+sepsis_with_vitals <- sepsis_icu |>
+  left_join(vitals_summary, by = c("subject_id", "hadm_id"))
+
+sepsis_with_labs <- sepsis_with_vitals |>
+  left_join(labs_summary, by = c("subject_id", "hadm_id"))
+
+```
+
+## 4. Raw Data
+
+```{r}
+#raw data view
+summary(sepsis_with_labs)
+
+# check
+cat("raw final dataset:", nrow(sepsis_icu), "\n")
+cat("Final rows:", nrow(sepsis_with_labs), "\n")
+
+# check % missingness across all columns
+sepsis_with_labs %>%
+  summarise(across(everything(), ~ round(mean(is.na(.x)) * 100, 1))) %>%
+  print(width = Inf)
+
+
+```
+
+## 5. Outlier Cleaning
+
+```{r}
+# remove physiologically impossible values for vitals and labs 
+sepsis_clean <- sepsis_with_labs |>
+  mutate(
+    heart_rate  = if_else(heart_rate > 300, NA_real_, heart_rate),
+    sbp         = if_else(sbp < 0 | sbp > 300, NA_real_, sbp),
+    dbp         = if_else(dbp < 0 | dbp > 200, NA_real_, dbp),
+    map         = if_else(map < 0 | map > 200, NA_real_, map),
+    resp_rate   = if_else(resp_rate > 60, NA_real_, resp_rate),
+    temperature = if_else(temperature < 25 | temperature > 45, NA_real_, temperature),
+    lactate     = if_else(lactate > 30, NA_real_, lactate),
+    wbc         = if_else(wbc > 200, NA_real_, wbc)
+  )
+
+# check % missingness after cleaning
+  # missingness increases slightly after cleaning — expected, since impossible values
+  # are now correctly coded as NA rather than real data
+      #ex: map goes from 0.4->1.4%     
+      #meaning 0.7% of map values were outside 0-200 range & got replaced with NA
+sepsis_clean |>
+  summarise(across(everything(), ~ round(mean(is.na(.x)) * 100, 1))) %>%
+  print(width = Inf)
+```
+
+## 6. Imputation
+
+```{r}
+# aggregate per patient then impute remaining NAs with median
+sepsis_imputed <- sepsis_clean %>%
+  group_by(subject_id) %>%
+  summarise(
+    # vitals: mean per patient to reduce extreme spikes
+    heart_rate  = mean(heart_rate, na.rm = TRUE),
+    sbp         = mean(sbp, na.rm = TRUE),
+    dbp         = mean(dbp, na.rm = TRUE),
+    map         = mean(map, na.rm = TRUE),
+    resp_rate   = mean(resp_rate, na.rm = TRUE),
+    temperature = mean(temperature, na.rm = TRUE),
+    
+    # labs: max per patient to capture peak severity (min for platelets — low is worse)
+    creatinine  = max(creatinine, na.rm = TRUE),
+    bilirubin   = max(bilirubin, na.rm = TRUE),
+    wbc         = max(wbc, na.rm = TRUE),
+    lactate     = max(lactate, na.rm = TRUE),
+    
+    #needs to be min for platelets
+    platelets   = min(platelets, na.rm = TRUE),
+    
+    # first() keeps the columns/variables 
+    # colesce() fills with median imputation
+    # demographics, comorbidities, outcome
+    anchor_age        = first(anchor_age),
+    gender            = first(gender),
+    race              = first(race),
+    hypertension      = first(hypertension),
+    diabetes          = first(diabetes),
+    ckd               = first(ckd),
+    cvd               = first(cvd),
+    chronic_liver     = first(chronic_liver),
+    immunosuppression = first(immunosuppression),
+    prolonged_stay    = first(prolonged_stay),
+    los_days          = first(los_days)
+  ) %>%
+  ungroup() %>%
+  mutate(across(
+    .cols = c(heart_rate, sbp, dbp, map, resp_rate, temperature,
+              creatinine, bilirubin, wbc, platelets, lactate),
+    ~ coalesce(.x, median(.x, na.rm = TRUE))
+  ))
+
+# confirm no remaining missingness
+sepsis_imputed %>%
+  summarise(across(c(heart_rate, sbp, dbp, map, resp_rate, temperature,
+                     creatinine, bilirubin, wbc, platelets, lactate),
+                   ~ round(mean(is.na(.x)) * 100, 1))) %>%
+  print()
+
+
+```
+
+## 7. Final Cohort
+
+```{r}
+# final cohort summary
+cat("Total patients:", nrow(sepsis_imputed), "\n")
+cat("Unique subjects:", n_distinct(sepsis_imputed$subject_id), "\n")
+
+# anchor age predictor: summary statistics
+summary(sepsis_imputed$anchor_age)
+
+# count of gender
+table(sepsis_imputed$gender)
+
+# count of prolonged stay
+table(sepsis_imputed$prolonged_stay)
+
+# proportion of prolonged stay
+prop.table(table(sepsis_imputed$prolonged_stay)) |> round(3)
+
+# outcome: summary statistics
+summary(sepsis_imputed$los_days)
+```
+
+## 8. Graphs & Tables
+
+```{r}
+# raw data: sepsis_with_labs --> outcome distribution
+sepsis_with_labs |>
+    count(prolonged_stay) |>
+    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
+           pct = round(n / sum(n) * 100, 1)) |>
+    ggplot(aes(x = label, y = n, fill = label)) +
+    geom_col(width = 0.5) +
+    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
+              vjust = -0.5, size = 4) +
+    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
+                                 "Normal (≤14 days)"    = "aquamarine2")) +
+    labs(title = "Outcome Distribution: Prolonged Hospital Stay",
+         x = NULL, y = "Number of Patients") +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+# sepsis_imputed: outcome distribution
+sepsis_imputed |>
+    count(prolonged_stay) |>
+    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
+           pct = round(n / sum(n) * 100, 1)) |>
+    ggplot(aes(x = label, y = n, fill = label)) +
+    geom_col(width = 0.5) +
+    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
+              vjust = -0.5, size = 4) +
+    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
+                                 "Normal (≤14 days)"    = "aquamarine")) +
+    labs(title = "Outcome Distribution: Prolonged Hospital Stay",
+         x = NULL, y = "Number of Patients") +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+# sepsis_imputed: age distribution
+ggplot(sepsis_imputed, aes(x = anchor_age)) +
+    geom_histogram(binwidth = 5, fill = "lightblue", color = "white") +
+    geom_vline(xintercept = mean(sepsis_imputed$anchor_age), 
+               linetype = "dashed", color = "red", linewidth = 0.8) +
+    annotate("text", x = mean(sepsis_imputed$anchor_age) + 2, y = 300,
+             label = paste0("Mean: ", round(mean(sepsis_imputed$anchor_age), 1)),
+             color = "red", hjust = 0) +
+    labs(title = "Age Distribution of ICU Sepsis Cohort",
+         x = "Age (years)", y = "Count") +
+    theme_minimal()
+
+# check cleaning: proportion of prolonged stay across pipeline stages
+mean(sepsis_with_labs$prolonged_stay)
+mean(sepsis_clean$prolonged_stay)
+mean(sepsis_imputed$prolonged_stay)
+```
+
+# Model 1: 
+
+## Logistic Regression: Lasso
+
+```{r}
+# 80/20 train/test split
+set.seed(42)
+train_idx <- sample(1:nrow(X), 0.8 * nrow(X))
+X_train <- X[train_idx, ]
+X_test  <- X[-train_idx, ]
+y_train <- y[train_idx]
+y_test  <- y[-train_idx]
+
+# LASSO logistic regression: same as logistic regression but penalizes 
+# small coefficients to zero — automatic variable selection
+# Ridge: shrinks but keeps all predictors
+# Elastic Net: mix of LASSO and Ridge
+# LASSO chosen for variable selection despite similar AUC across all models
+# Youden threshold: maximizes sensitivity + specificity instead of default 0.5
+
+# LASSO: retrain on training set
+set.seed(42)
+cv_lasso    <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 1, nfolds = 10)
+lasso_model <- glmnet(X_train, y_train, family = "binomial", alpha = 1, lambda = cv_lasso$lambda.min)
+lasso_pred  <- as.numeric(predict(lasso_model, newx = X_test, type = "response"))
+roc_lasso   <- roc(y_test, lasso_pred)
+auc_lasso   <- auc(roc_lasso)
+
+# LASSO: performance on test set at Youden threshold
+thresh_lasso <- best_threshold(roc_lasso)
+m_lasso      <- calc_metrics(lasso_pred, y_test, thresh_lasso)
+cat(sprintf("AUC: %.3f\nThreshold: %.3f\nSensitivity: %.1f%%\nSpecificity: %.1f%%\n\n",
+            auc_lasso, thresh_lasso, m_lasso[1], m_lasso[2]))
+
+# LASSO: selected predictors (trained on training set)
+coef(lasso_model) |>
+  as.matrix() |>
+  as.data.frame() |>
+  rownames_to_column("Variable") |>
+  filter(Variable != "(Intercept)", s0 != 0) |>
+  arrange(desc(abs(s0))) |>
+  print()
+
+
+# extended check: all negative coefficient variables vs mortality
+sepsis_imputed |>
+  left_join(admissions |> select(subject_id, hospital_expire_flag), by = "subject_id") |>
+  group_by(hospital_expire_flag) |>
+  summarise(
+    mean_age       = mean(anchor_age, na.rm = TRUE),
+    mean_lactate   = mean(lactate[is.finite(lactate)], na.rm = TRUE),
+    mean_resp_rate = mean(resp_rate, na.rm = TRUE),
+    mean_dbp       = mean(dbp, na.rm = TRUE),
+    mean_sbp       = mean(sbp, na.rm = TRUE),
+    mean_los       = mean(los_days, na.rm = TRUE)
+  )
+
+# deaths had higher lactate but shorter LOS — explaining negative lactate coefficient
+# hospital_expire_flag not included as predictor — mortality occurs during the stay
+# and is not known at admission (competing risk, not a baseline variable)
+
+```
+
+## Graphing ROC Curves
+
+```{r}
+
+# build roc_df from test set ROC objects
+lab_lr    <- paste0("Logistic Regression\nAUC = ", round(auc_lr, 3))
+lab_ridge <- paste0("Ridge\nAUC = ", round(auc_ridge, 3))
+lab_lasso <- paste0("LASSO\nAUC = ", round(auc_lasso, 3))
+lab_enet  <- paste0("Elastic Net\nAUC = ", round(auc_enet, 3))
+
+roc_df <- bind_rows(
+  data.frame(FPR = 1 - roc_lr$specificities,    TPR = roc_lr$sensitivities,    Model = lab_lr),
+  data.frame(FPR = 1 - roc_ridge$specificities,  TPR = roc_ridge$sensitivities,  Model = lab_ridge),
+  data.frame(FPR = 1 - roc_lasso$specificities,  TPR = roc_lasso$sensitivities,  Model = lab_lasso),
+  data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = lab_enet)
+)
+#4 graphs
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(lwd = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  facet_wrap(~ Model, ncol = 2) +
+  scale_color_manual(values = setNames(
+   c("cyan", "blue", "magenta", "green"),
+    c(lab_lr, lab_ridge, lab_lasso, lab_enet)
+  )) +
+  labs(
+    title = "ROC Curves by Model",
+    x     = "False Positive Rate (1 - Specificity)",
+    y     = "True Positive Rate (Sensitivity)"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text      = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+# combined all 4 into one graph
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(lwd = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = setNames(
+    c("cyan", "blue", "magenta", "green"),
+    c(lab_lr, lab_ridge, lab_lasso, lab_enet)
+  )) +
+  labs(
+    title = "ROC Curves by Model",
+    x     = "False Positive Rate (1 - Specificity)",
+    y     = "True Positive Rate (Sensitivity)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```

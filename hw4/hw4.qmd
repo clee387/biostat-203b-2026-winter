@@ -1,0 +1,296 @@
+---
+title: "Biostat 203B Homework 4"
+subtitle: "Due Mar 11 @ 11:59PM"
+author: "Charlotte Lee and 206782165"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+---
+
+Display machine information:
+
+```{r}
+sessionInfo()
+```
+
+Display my machine memory.
+
+```{r}
+memuse::Sys.meminfo()
+```
+
+Load database libraries and the tidyverse frontend:
+
+```{r}
+#| message: false
+#| warning: false
+library(bigrquery)
+library(dbplyr)
+library(RPostgres)
+library(dplyr)
+library(DBI)
+library(gt)
+library(gtsummary)
+library(tidyverse)
+library(styler)
+library(shiny)
+
+# Style my current file
+styler::style_file("hw4/hw4.qmd")
+```
+
+## Q1. Compile the ICU cohort in HW3 from the Google BigQuery database
+
+Below is an outline of steps. In this homework, we exclusively work with the BigQuery database and should not use any MIMIC data files stored on our local computer. Transform data as much as possible in BigQuery database and `collect()` the tibble **only at the end of Q1.7**.
+
+### Q1.1 Connect to BigQuery
+
+174Connect to BigQuery database `mimiciv_3_1` in GCP (Google Cloud Platform), using the project billing account `biostat-203b-2025-winter`.
+
+```{r}
+token <- gargle::credentials_service_account(
+  path = "/Users/charlottelee/Documents/biostat-203b-2026-winter/hw4/biostat-203b-2026-winter-92fefbfab477.json",
+  scopes = "https://www.googleapis.com/auth/bigquery"
+)
+bq_auth(token = token)
+con_bq <- dbConnect(
+  bigrquery::bigquery(),
+  project = "biostat-203b-2025-winter",
+  dataset = "mimiciv_3_1",
+  billing = "biostat-203b-2025-winter"
+)
+```
+
+List all tables in the `mimiciv_3_1` database.
+
+```{r}
+dbListTables(con_bq)
+```
+
+### Q1.2 `icustays` data
+
+Connect to the `icustays` table.
+
+```{r}
+# full ICU stays table
+icustays_tble <- tbl(con_bq, "icustays") |>
+  arrange(subject_id, hadm_id, stay_id) |>
+  # show_query() |>
+  print(width = Inf)
+```
+
+### Q1.3 `admissions` data
+
+Connect to the `admissions` table.
+
+```{r}
+# # TODO
+admissions_tble <- tbl(con_bq, "admissions") |>
+  arrange(subject_id, hadm_id, admission_type) |>
+  # show_query() |>
+  print(width = Inf)
+```
+
+### Q1.4 `patients` data
+
+Connect to the `patients` table.
+
+```{r}
+# # TODO
+patients_tble <- tbl(con_bq, "patients") |>
+  arrange(subject_id, gender, anchor_age) |>
+  # show_query() |>
+  print(width = Inf)
+```
+
+### Q1.5 `labevents` data
+
+Connect to the `labevents` table and retrieve a subset that only contain subjects who appear in `icustays_tble` and the lab items listed in HW3. Only keep the last lab measurements (by `storetime`) before the ICU stay and pivot lab items to become variables/columns. Write all steps in *one* chain of pipes.
+
+```{r}
+# # TODO
+labevents_tble <- tbl(con_bq, "labevents") %>%
+  filter(itemid %in% c(
+    50862, 50912, 50971, 50983,
+    50902, 50882, 51221, 51301, 50931
+  )) %>%
+  semi_join(icustays_tble, by = "subject_id") %>%
+  left_join(
+    icustays_tble %>% select(subject_id, intime),
+    by = "subject_id"
+  ) %>%
+  filter(storetime < intime) %>%
+  group_by(subject_id, itemid) %>%
+  slice_max(storetime, n = 1) %>%
+  ungroup() %>%
+  select(subject_id, itemid, valuenum) %>%
+  pivot_wider(
+    names_from = itemid,
+    values_from = valuenum
+  )
+labevents_tble
+```
+
+### Q1.6 `chartevents` data
+
+Connect to `chartevents` table and retrieve a subset that only contain subjects who appear in `icustays_tble` and the chart events listed in HW3. Only keep the first chart events (by `storetime`) during ICU stay and pivot chart events to become variables/columns. Write all steps in *one* chain of pipes. Similary to HW3, if a vital has multiple measurements at the first `storetime`, average them.
+
+```{r}
+# # TODO
+chartevents_tble <- tbl(con_bq, "chartevents") %>%
+  filter(itemid %in% c(220045, 220179, 220180, 223761, 220210)) %>%
+  semi_join(icustays_tble, by = "subject_id") %>%
+  left_join(
+    icustays_tble %>% select(subject_id, stay_id, intime, outtime),
+    by = c("subject_id", "stay_id")
+  ) %>%
+  filter(storetime >= intime, storetime <= outtime) %>%
+  group_by(subject_id, stay_id, itemid) %>%
+  filter(storetime == min(storetime, na.rm = TRUE)) %>%
+  summarise(valuenum = mean(valuenum, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = itemid, values_from = valuenum) %>%
+  rename(
+    heart_rate   = "220045",
+    systolic_bp  = "220179",
+    diastolic_bp = "220180",
+    temp_f       = "223761",
+    resp_rate    = "220210"
+  )
+chartevents_tble
+```
+
+### Q1.7 Put things together
+
+This step is similar to Q7 of HW3. Using *one* chain of pipes `|>` to perform following data wrangling steps: (i) start with the `icustays_tble`, (ii) merge in admissions and patients tables, (iii) keep adults only (age at ICU intime \>= 18), (iv) merge in the labevents and chartevents tables, (v) `collect` the tibble, (vi) sort `subject_id`, `hadm_id`, `stay_id` and `print(width = Inf)`.
+
+```{r}
+# # TODO
+mimic_icu_cohort <- icustays_tble %>%
+  left_join(tbl(con_bq, "admissions"), by = c("subject_id", "hadm_id")) %>%
+  left_join(tbl(con_bq, "patients"), by = "subject_id") %>%
+  mutate(age_intime = year(intime) - anchor_year + anchor_age) %>%
+  filter(age_intime >= 18) %>%
+  left_join(labevents_tble, by = "subject_id") %>%
+  left_join(chartevents_tble, by = c("subject_id", "stay_id")) %>%
+  collect() %>%
+  rename(
+    albumin     = "50862",
+    bicarbonate = "50882",
+    chloride    = "50902",
+    creatinine  = "50912",
+    glucose     = "50931",
+    hematocrit  = "51221",
+    potassium   = "50971",
+    sodium      = "50983",
+    wbc         = "51301"
+  ) %>%
+  arrange(subject_id, hadm_id, stay_id) %>%
+  print(width = Inf)
+```
+
+### Q1.8 Preprocessing
+
+Perform the following preprocessing steps. (i) Lump infrequent levels into "Other" level for `first_careunit`, `last_careunit`, `admission_type`, `admission_location`, and `discharge_location`. (ii) Collapse the levels of `race` into `ASIAN`, `BLACK`, `HISPANIC`, `WHITE`, and `Other`. (iii) Create a new variable `los_long` that is `TRUE` when `los` is greater than or equal to 2 days. (iv) Summarize the data using `tbl_summary()`, stratified by `los_long`. Hint: `fct_lump_n` and `fct_collapse` from the `forcats` package are useful.
+
+```{r}
+#| eval: true
+mimic_icu_cohort <- mimic_icu_cohort %>%
+  mutate(
+    first_careunit = fct_lump_n(first_careunit, n = 5),
+    last_careunit = fct_lump_n(last_careunit, n = 5),
+    admission_type = fct_lump_n(admission_type, n = 4),
+    admission_location = fct_lump_n(admission_location, n = 4),
+    discharge_location = fct_lump_n(discharge_location, n = 4),
+    race = fct_collapse(race,
+      ASIAN = c(
+        "ASIAN", "ASIAN - ASIAN INDIAN", "ASIAN - CHINESE",
+        "ASIAN - KOREAN", "ASIAN - SOUTH EAST ASIAN"
+      ),
+      BLACK = c(
+        "BLACK/AFRICAN", "BLACK/AFRICAN AMERICAN",
+        "BLACK/CAPE VERDEAN", "BLACK/CARIBBEAN ISLAND"
+      ),
+      HISPANIC = c(
+        "HISPANIC OR LATINO", "HISPANIC/LATINO - CENTRAL AMERICAN",
+        "HISPANIC/LATINO - COLUMBIAN", "HISPANIC/LATINO - CUBAN",
+        "HISPANIC/LATINO - DOMINICAN", "HISPANIC/LATINO - GUATEMALAN",
+        "HISPANIC/LATINO - HONDURAN", "HISPANIC/LATINO - MEXICAN",
+        "HISPANIC/LATINO - PUERTO RICAN", "HISPANIC/LATINO - SALVADORAN"
+      ),
+      WHITE = c(
+        "WHITE", "WHITE - BRAZILIAN", "WHITE - EASTERN EUROPEAN",
+        "WHITE - OTHER EUROPEAN", "WHITE - RUSSIAN"
+      ),
+      other_level = "Other"
+    ),
+    los_long = los >= 2
+  )
+
+# displaying the table (not saving anywhere)
+mimic_icu_cohort %>%
+  select(
+    first_careunit, last_careunit, los, admission_type, admission_location,
+    discharge_location, race, gender, age_intime, los_long,
+    heart_rate, systolic_bp, diastolic_bp, temp_f, resp_rate,
+    albumin, bicarbonate, chloride, creatinine, glucose,
+    hematocrit, potassium, sodium, wbc
+  ) %>%
+  tbl_summary(by = los_long)
+```
+
+### Q1.9 Save the final tibble
+
+Save the final tibble to an R data file `mimic_icu_cohort.rds` in the `mimiciv_shiny` folder.
+
+```{r}
+# make a directory mimiciv_shiny
+if (!dir.exists("mimiciv_shiny")) {
+  dir.create("mimiciv_shiny")
+}
+# save the final tibble
+if (exists("mimic_icu_cohort")) {
+  mimic_icu_cohort |>
+    write_rds("mimiciv_shiny/mimic_icu_cohort.rds", compress = "gz")
+}
+```
+
+Close database connection and clear workspace.
+
+```{r}
+if (exists("con_bq")) {
+  dbDisconnect(con_bq)
+}
+rm(list = ls())
+```
+
+**Although it is not a good practice to add big data files to Git, for grading purpose, please add `mimic_icu_cohort.rds` to your Git repository.**
+
+## Q2. Shiny app
+
+Develop a Shiny app for exploring the ICU cohort data created in Q1. The app should reside in the `mimiciv_shiny` folder. The app should contain at least two tabs. One tab provides easy access to the graphical and numerical summaries of variables (demographics, lab measurements, vitals) in the ICU cohort, using the `mimic_icu_cohort.rds` you curated in Q1. The other tab allows user to choose a specific patient in the cohort and display the patient's ADT and ICU stay information as we did in Q1 of HW3, by dynamically retrieving the patient's ADT and ICU stay information from BigQuery database. Again, do **not** ever add the BigQuery token to your Git repository. If you do so, you will lose 50 points.
+
+```{r}
+#| eval: false
+shiny::runApp("mimiciv_shiny", launch.browser = TRUE)
+```
+
+## Q3. AI assistant
+
+Which AI assistants (e.g., GitHub Copilot) do you use when working on this assignment? Which AI model (e.g., GPT-5 mini, GPT-5, Claude Sonnet 4.5) does the AI assistant use? How do you use them? Do you think they help improve your productivity?
+
+Give 5 instances where AI model gave incorrect or misleading answers. You can use screenshots or copy-paste the Q&A.
+
+1.  I reported that the ADT plot was showing nothing. Claude had used scale_linewidth_manual(values = c("FALSE" = 0.7, "TRUE" = 2.5)) with string keys on a logical column, causing a silent crash with no error message.![](images/Screenshot%202026-03-11%20at%2011.30.15%20PM.png)
+2.  I reported that my entire Cohort Summary tab stopped working after Claude added the Patient Explorer. Claude had placed bq_auth() at the top level of the server function, crashing the whole app on startup before any tab could load.![](images/Screenshot%202026-03-11%20at%2011.32.08%20PM.png)
+3.  I asked Claude to fix my checkboxes. Claude defined output\$dist_checkboxes three times in the same server — Shiny only runs the last one, which had a broken selected argument that crashed the whole tab.![](images/Screenshot%202026-03-11%20at%2011.33.52%20PM.png)
+4.  I reported that selecting multiple variables gave broken axes and overlapping legends. Claude had used Plotly's subplot() which merges everything into one figure with shared axes, which was the wrong approach entirely.![](images/Screenshot%202026-03-11%20at%2011.34.25%20PM.png)
+5.  I reported BIGQUERY_KEY not set errors. Claude had me set up .env files, dotenv, and readRenviron() across multiple failed attempts, when the simple bq_auth(path = "key.json") + dbConnect() I was already using in HW3 was all that was needed.
+
+![](images/Screenshot%202026-03-11%20at%2011.35.04%20PM.png)
