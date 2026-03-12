@@ -54,15 +54,17 @@ Below is an outline of steps. In this homework, we exclusively work with the Big
 174Connect to BigQuery database `mimiciv_3_1` in GCP (Google Cloud Platform), using the project billing account `biostat-203b-2025-winter`.
 
 ```{r}
-# connect to the BigQuery database `biostat-203b-2025-mimiciv_3_1`
+token <- gargle::credentials_service_account(
+  path = "/Users/charlottelee/Documents/biostat-203b-2026-winter/hw4/biostat-203b-2026-winter-92fefbfab477.json",
+  scopes = "https://www.googleapis.com/auth/bigquery"
+)
+bq_auth(token = token)
 con_bq <- dbConnect(
   bigrquery::bigquery(),
   project = "biostat-203b-2025-winter",
   dataset = "mimiciv_3_1",
   billing = "biostat-203b-2025-winter"
 )
-con_bq
-bq_auth(path = "hw4/biostat-203b-2026-winter-92fefbfab477.json")
 ```
 
 List all tables in the `mimiciv_3_1` database.
@@ -120,16 +122,18 @@ labevents_tble <- tbl(con_bq, "labevents") %>%
   )) %>%
   semi_join(icustays_tble, by = "subject_id") %>%
   left_join(
-    icustays_tble %>% select(subject_id, stay_id, intime, outtime),
-    by = c("subject_id", "stay_id")
+    icustays_tble %>% select(subject_id, intime),
+    by = "subject_id"
   ) %>%
   filter(storetime < intime) %>%
   group_by(subject_id, itemid) %>%
   slice_max(storetime, n = 1) %>%
   ungroup() %>%
   select(subject_id, itemid, valuenum) %>%
-  pivot_wider(names_from = itemid, values_from = valuenum)
-
+  pivot_wider(
+    names_from = itemid,
+    values_from = valuenum
+  )
 labevents_tble
 ```
 
@@ -195,11 +199,6 @@ mimic_icu_cohort <- icustays_tble %>%
 
 Perform the following preprocessing steps. (i) Lump infrequent levels into "Other" level for `first_careunit`, `last_careunit`, `admission_type`, `admission_location`, and `discharge_location`. (ii) Collapse the levels of `race` into `ASIAN`, `BLACK`, `HISPANIC`, `WHITE`, and `Other`. (iii) Create a new variable `los_long` that is `TRUE` when `los` is greater than or equal to 2 days. (iv) Summarize the data using `tbl_summary()`, stratified by `los_long`. Hint: `fct_lump_n` and `fct_collapse` from the `forcats` package are useful.
 
-Hint: Below is a numerical summary of my tibble after preprocessing:
-
-<iframe width="95%" height="500" src="./mimic_icu_cohort_gtsummary.html">
-
-</iframe>
 
 ```{r}
 #| eval: true
