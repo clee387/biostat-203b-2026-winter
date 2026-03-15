@@ -2,6 +2,8 @@
 title: "Biostat Final Project"
 subtitle: "Due Mar 18 @ 11:59PM"
 author: "Charlotte Lee and 206782165"
+execute:
+  cache: true         
 format:
   html:
     theme: cosmo
@@ -32,6 +34,10 @@ library(corrplot)
 ## Connect to The Data
 
 ```{r}
+# authenticate
+bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
+
+# connect
 con_bq <- dbConnect(
     bigrquery::bigquery(),
     project = "biostat-203b-2025-winter",
@@ -39,7 +45,6 @@ con_bq <- dbConnect(
     billing = "biostat-203b-2025-winter"
 )
 con_bq
-bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
 ```
 
 # Data Cleaning + Pre-Processing
@@ -101,9 +106,9 @@ print(summary(cohort_df$anchor_age))
 Outcome (**admissions.csv**)
 
 ```{r}
-# pull admissions and calculate LOS
+# pulls LOS + race in one query instead of two
 admissions_tbl <- tbl(con_bq, "admissions") |>
-  select(subject_id, hadm_id, admittime, dischtime) |>
+  select(subject_id, hadm_id, admittime, dischtime, race) |>
   mutate(los_days = sql("TIMESTAMP_DIFF(dischtime, admittime, DAY)")) |>
   collect()
 
@@ -127,13 +132,8 @@ cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
 ### 3.1 Demographics
 
 ```{r}
-# add race from admissions (anchor_age & gender already in cohort_df)
-demographics_tbl <- tbl(con_bq, "admissions") |>
-  select(subject_id, hadm_id, race) |>
-  collect()
-
-sepsis_with_demo <- sepsis_with_outcome |>
-  inner_join(demographics_tbl, by = c("subject_id", "hadm_id"))
+# race already joined in section 2 — no second BQ pull needed
+sepsis_with_demo <- sepsis_with_outcome
 
 # check:
 cat("Rows after joining demographics: ", nrow(sepsis_with_demo), "\n")
@@ -210,20 +210,18 @@ dim(sepsis_with_comorbidities)
 cohort_ids <- sepsis_with_comorbidities$hadm_id
 
 # pull earliest ICU admission time per stay
-icustays_raw <- tbl(con_bq, "icustays") |>
+icu_admissions_bq <- tbl(con_bq, "icustays") |>
   filter(hadm_id %in% !!cohort_ids) |>
-  select(subject_id, hadm_id, intime) |>
-  collect() |>
   group_by(subject_id, hadm_id) |>
-  slice_min(intime, n = 1) |>
-  ungroup()
+  summarise(intime = min(intime, na.rm = TRUE), .groups = "drop")
+
+# keep a local copy too for later filtering
+icustays_raw <- icu_admissions_bq |> collect()
+icu_admissions <- icustays_raw  # alias used downstream
 
 #check
 cat("ICU stays pulled:", nrow(icustays_raw), "\n")
 
-# slimmed down for joining into vitals & labs
-icu_admissions <- icustays_raw |>
-  select(subject_id, hadm_id, intime)
 ```
 
 ### 3.4 Vital Items
@@ -239,15 +237,15 @@ vitals_raw <- tbl(con_bq, "chartevents") |>
     !is.na(valuenum)
   ) |>
   select(subject_id, hadm_id, itemid, charttime, valuenum) |>
-  collect() |>
-  inner_join(icu_admissions, by = c("subject_id", "hadm_id")) |>
+  inner_join(icu_admissions_bq, by = c("subject_id", "hadm_id")) |>
   filter(
     charttime >= intime,
-    charttime <= intime + lubridate::hours(24)
+    charttime <= sql("TIMESTAMP_ADD(intime, INTERVAL 24 HOUR)")
   ) |>
   mutate(
     valuenum = if_else(itemid == 223761, (valuenum - 32) * 5/9, valuenum)
-  )
+  ) |>
+  collect()   # now collects only 24h window rows, not the whole table
 
 # map itemids to vital names (some vitals have multiple itemids)
 vital_items <- tibble::tibble(
@@ -524,7 +522,7 @@ mean(sepsis_clean$prolonged_stay)
 mean(sepsis_imputed$prolonged_stay)
 ```
 
-# Model 1: 
+# Model 1:
 
 ## Logistic Regression: Lasso
 
