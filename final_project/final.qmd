@@ -986,6 +986,7 @@ rf_auc <- final_rf_fit |>
   collect_metrics() |>
   filter(.metric == "roc_auc") |>
   pull(.estimate)
+
 cat("Random Forest Test AUC:", round(rf_auc, 3), "\n")
 ```
 
@@ -1079,5 +1080,6 @@ gb_auc <- final_gb_fit |>
   collect_metrics() |>
   filter(.metric == "roc_auc") |>
   pull(.estimate)
+
 cat("XGBoost Test AUC:", round(gb_auc, 3), "\n")
 ```
