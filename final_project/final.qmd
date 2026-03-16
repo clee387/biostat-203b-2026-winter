@@ -703,10 +703,10 @@ Model: add race???
 # model matrix
 #insurance: captures social determinants of health — meaningful variation in prolonged
 #            stay across categories (Other 46.1% vs Medicare 34.1%)
-model_vars <- c("anchor_age", "gender", "race_collapsed", 
-                "heart_rate", "map", "resp_rate", "gcs_total",        # dropped sbp and dbp bc multicolinearity
-                "temperature", "creatinine", "bilirubin", 
-                "wbc", "platelets", "lactate",
+model_vars <- c("anchor_age", "gender", "race_collapsed",
+                "heart_rate", "map", "resp_rate",
+                "temperature", "creatinine", "bilirubin",
+                "wbc", "platelets", "lactate", "gcs_total",
                 "hypertension", "diabetes", "ckd", "cvd",
                 "chronic_liver", "immunosuppression",
                 "vasopressor", "insurance")
@@ -722,15 +722,19 @@ model_df <- sepsis_imputed |>
       race %in% c("UNKNOWN", "UNABLE TO OBTAIN",
                   "PATIENT DECLINED TO ANSWER") ~ "UNKNOWN",
       TRUE ~ "OTHER"
-    ) |> as.factor()
+    ) |> as.factor(),
+    insurance = if_else(is.na(insurance), "Unknown",
+                        as.character(insurance)) |> as.factor()
   ) |>
   select(all_of(model_vars), prolonged_stay) |>
   mutate(across(where(is.numeric), ~if_else(is.infinite(.x), NA_real_, .x))) |>
   drop_na()
 
 cat("Rows in model_df:", nrow(model_df), "\n")
-cat("Race distribution:\n")
-table(model_df$race_collapsed) |> print()
+cat("Total rows in sepsis_imputed:", nrow(sepsis_imputed), "\n")
+cat("Rows dropped by drop_na():", nrow(sepsis_imputed) - nrow(model_df), "\n")
+cat("Insurance distribution:\n")
+table(model_df$insurance) |> print()
 cat("Outcome distribution:\n")
 prop.table(table(model_df$prolonged_stay)) |> round(3) |> print()
 
@@ -888,9 +892,28 @@ ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
+
+
+# combine all ROC curves
+roc_df <- bind_rows(
+  data.frame(FPR = 1 - roc_lr$specificities,    TPR = roc_lr$sensitivities,    Model = paste0("Logistic Regression (AUC=", round(auc_lr,3), ")")),
+  data.frame(FPR = 1 - roc_lasso$specificities,  TPR = roc_lasso$sensitivities,  Model = paste0("LASSO (AUC=", round(auc_lasso,3), ")")),
+  data.frame(FPR = 1 - roc_ridge$specificities,  TPR = roc_ridge$sensitivities,  Model = paste0("Ridge (AUC=", round(auc_ridge,3), ")")),
+  data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = paste0("Elastic Net (AUC=", round(auc_enet,3), ")"))
+)
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(lwd = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  labs(title = "ROC Curves — All Models",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 7))
+
 ```
 
-# Random Forest for Classification
+# Random Forest for Classification Model
 
 ```{r}
 # step 1: re-split data using tidymodels (stratified on outcome)
@@ -972,7 +995,7 @@ final_rf_fit |> collect_metrics()
 # variable importance plot
 final_rf_fit |>
   extract_fit_parsnip() |>
-  vip(num_features = 24) +
+  vip(num_features = 21) +
   labs(title = "Random Forest Variable Importance")
 
 # ROC curve
@@ -988,12 +1011,12 @@ rf_auc <- final_rf_fit |>
   pull(.estimate)
 
 cat("Random Forest Test AUC:", round(rf_auc, 3), "\n")
+
 ```
 
-# XG Boost
+# XG Boost Model
 
 ```{r}
-
 # step 1: recipe (same split as RF — sepsis_split already defined)
 gb_recipe <- recipe(prolonged_stay ~ ., data = sepsis_other) |>
   # dummy code categorical variables — required for xgboost
@@ -1066,7 +1089,7 @@ final_gb_fit |> collect_metrics()
 # variable importance
 final_gb_fit |>
   extract_fit_parsnip() |>
-  vip(num_features = 24) +
+  vip(num_features = 21) +
   labs(title = "XGBoost Variable Importance")
 
 # ROC curve
@@ -1082,4 +1105,133 @@ gb_auc <- final_gb_fit |>
   pull(.estimate)
 
 cat("XGBoost Test AUC:", round(gb_auc, 3), "\n")
+```
+
+1.  Cohort flow diagram
+
+```{r}
+# cohort flow - how many patients at each step
+cohort_flow <- tibble(
+  Step = c(
+    "Adult sepsis ICU admissions",
+    "After outcome filter (LOS > 0)",
+    "After first admission filter",
+    "After 48h early death exclusion",
+    "Final analytic cohort"
+  ),
+  N = c(5017, 4953, 4478, 4179, 4179),
+  label = c(
+    "5,017",
+    "4,953 (-64 same-day discharges)",
+    "4,478 (-475 duplicate admissions)",
+    "4,179 (-299 early deaths)",
+    "4,179 (final)"
+  )
+) |>
+  mutate(Step = factor(Step, levels = rev(Step)))
+
+ggplot(cohort_flow, aes(x = N, y = Step)) +
+  geom_col(fill = "steelblue", width = 0.5) +
+  geom_text(aes(label = label), hjust = -0.05, size = 3.5) +
+  labs(title = "Cohort Construction Flow",
+       x = "Number of Patients", y = NULL) +
+  xlim(0, 9000) +   # increased to fit long labels
+  theme_minimal()
+```
+
+2.  Key predictor distributions by outcome:
+
+```{r}
+# key continuous predictors based on LASSO + clinical importance
+sepsis_imputed |>
+  pivot_longer(
+    cols = c(gcs_total, creatinine, lactate, 
+             temperature, map, anchor_age),
+    names_to  = "variable",
+    values_to = "value"
+  ) |>
+  mutate(
+    prolonged_stay = factor(prolonged_stay,
+                            labels = c("Normal (<14d)", "Prolonged (≥14d)")),
+    variable = recode(variable,
+      gcs_total   = "GCS Total",
+      creatinine  = "Creatinine",
+      lactate     = "Lactate",
+      temperature = "Temperature",
+      map         = "MAP",
+      anchor_age  = "Age"
+    )
+  ) |>
+  ggplot(aes(x = value, fill = prolonged_stay)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ variable, scales = "free", ncol = 3) +
+  scale_fill_manual(values = c("aquamarine3", "salmon")) +
+  labs(title = "Distribution of Key Continuous Predictors by Outcome",
+       x = NULL, y = "Density", fill = "Outcome") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+3.  Comorbidity prevalence by outcome:
+
+```{r}
+sepsis_imputed |>
+  mutate(prolonged_stay = factor(prolonged_stay,
+                                  labels = c("Normal", "Prolonged"))) |>
+  group_by(prolonged_stay) |>
+  summarise(across(c(hypertension, diabetes, ckd, cvd,
+                     chronic_liver, immunosuppression, vasopressor),
+                   ~ round(mean(.x) * 100, 1))) |>
+  pivot_longer(-prolonged_stay, 
+               names_to = "comorbidity", 
+               values_to = "pct") |>
+  mutate(comorbidity = recode(comorbidity,
+    hypertension      = "Hypertension",
+    diabetes          = "Diabetes",
+    ckd               = "CKD",
+    cvd               = "CVD",
+    chronic_liver     = "Chronic Liver",
+    immunosuppression = "Immunosuppression",
+    vasopressor       = "Vasopressor"
+  )) |>
+  ggplot(aes(x = reorder(comorbidity, pct), y = pct, fill = prolonged_stay)) +
+  geom_col(position = "dodge", width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("aquamarine3", "salmon")) +
+  labs(title = "Comorbidity Prevalence by Outcome",
+       x = NULL, y = "Prevalence (%)", fill = "Outcome") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#LASSO coefficient plot:
+
+lasso_coefs |>
+  filter(dropped == "kept") |>
+  arrange(s0) |>
+  mutate(Variable = factor(Variable, levels = Variable),
+         direction = if_else(s0 > 0, "Increases risk", "Decreases risk")) |>
+  ggplot(aes(x = s0, y = Variable, fill = direction)) +
+  geom_col() +
+  scale_fill_manual(values = c("Increases risk" = "salmon",
+                               "Decreases risk" = "aquamarine3")) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(title = "LASSO Coefficients",
+       x = "Coefficient", y = NULL, fill = NULL) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+Correlation heatmap of predictors
+
+```{r}
+model_df |>
+  select(where(is.numeric)) |>
+  cor(use = "complete.obs") |>
+  corrplot(method = "color",
+           type = "upper",
+           tl.cex = 0.7,
+           title = "Predictor Correlation Matrix",
+           mar = c(0,0,1,0))
 ```
