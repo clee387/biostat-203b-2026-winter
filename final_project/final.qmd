@@ -30,6 +30,17 @@ library(tidyverse)
 library(glmnet)
 library(pROC)
 library(corrplot)
+
+# Added for RF Model
+library(tidymodels)
+library(ranger)
+library(vip)
+
+# Added for xgboost
+library(xgboost)
+
+library(styler)
+
 ```
 
 ## Connect to The Data
@@ -822,4 +833,109 @@ ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
+```
+
+# Random Forest for Classification
+
+```{r}
+# step 1: re-split data using tidymodels (stratified on outcome)
+set.seed(42)
+sepsis_split <- initial_split(
+  model_df |> mutate(prolonged_stay = as.factor(prolonged_stay)),
+  prop = 0.8,
+  strata = "prolonged_stay"
+)
+sepsis_other <- training(sepsis_split)
+sepsis_test  <- testing(sepsis_split)
+
+# step 2: recipe (preprocessing)
+rf_recipe <- recipe(prolonged_stay ~ ., data = sepsis_other) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_numeric_predictors())
+
+# step 3: model spec with tuning
+rf_mod <- rand_forest(
+  mode  = "classification",
+  mtry  = tune(),
+  trees = tune()
+) |>
+  set_engine("ranger", importance = "impurity")
+
+# step 4: workflow
+rf_wf <- workflow() |>
+  add_recipe(rf_recipe) |>
+  add_model(rf_mod)
+
+# step 5: tuning grid
+param_grid_rf <- grid_regular(
+  trees(range = c(100L, 300L)),
+  mtry(range  = c(1L, 5L)),
+  levels = c(3, 5)
+)
+
+# step 6: 5-fold CV
+set.seed(42)
+folds <- vfold_cv(sepsis_other, v = 5, strata = "prolonged_stay")
+
+# step 7: tune
+rf_fit <- rf_wf |>
+  tune_grid(
+    resamples = folds,
+    grid      = param_grid_rf,
+    metrics   = metric_set(roc_auc, accuracy)
+  )
+
+# visualize CV results
+rf_fit |>
+  collect_metrics() |>
+  filter(.metric == "roc_auc") |>
+  mutate(mtry = as.factor(mtry)) |>
+  ggplot(aes(x = trees, y = mean, color = mtry)) +
+  geom_line() +
+  geom_point()
+  labs(x = "Number of Trees", y = "CV AUC",
+       title = "Random Forest CV Tuning")
+
+# show best models
+rf_fit |> show_best(metric = "roc_auc")
+
+# select best
+best_rf <- rf_fit |> select_best(metric = "roc_auc")
+best_rf
+
+# step 8:finalize and test:
+
+# finalize workflow with best parameters
+final_rf_wf <- rf_wf |> finalize_workflow(best_rf)
+
+# fit on full training set, evaluate on test set
+final_rf_fit <- final_rf_wf |> last_fit(sepsis_split)
+
+# test metrics
+final_rf_fit |> collect_metrics()
+
+# variable importance plot
+final_rf_fit |>
+  extract_fit_parsnip() |>
+  vip(num_features = 24) +
+  labs(title = "Random Forest Variable Importance")
+
+# ROC curve
+final_rf_fit |>
+  collect_predictions() |>
+  roc_curve(prolonged_stay, .pred_1) |>
+  autoplot()
+
+# AUC
+rf_auc <- final_rf_fit |>
+  collect_metrics() |>
+  filter(.metric == "roc_auc") |>
+  pull(.estimate)
+cat("Random Forest Test AUC:", round(rf_auc, 3), "\n")
+```
+
+# XG Boost
+
+```{r}
+
 ```
