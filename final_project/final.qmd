@@ -115,9 +115,9 @@ print(summary(cohort_df$anchor_age))
 Outcome (**admissions.csv**)
 
 ```{r}
-# pulls LOS + race in one query instead of two
+# pulls LOS + race + insurance in one query instead of two
 admissions_tbl <- tbl(con_bq, "admissions") |>
-  select(subject_id, hadm_id, admittime, dischtime, race) |>
+  select(subject_id, hadm_id, admittime, dischtime, race, insurance) |>
   mutate(los_days = sql("TIMESTAMP_DIFF(dischtime, admittime, DAY)")) |>
   collect()
 
@@ -134,6 +134,10 @@ cat("Prolonged stay (>=14d): ", sum(sepsis_with_outcome$prolonged_stay), "\n")
 cat("% prolonged:            ", round(mean(sepsis_with_outcome$prolonged_stay)*100, 1), "%\n")
 cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
 
+# insurance check
+cat("\n--- Insurance Distribution ---\n")
+table(sepsis_with_outcome$insurance) |> print()
+cat("% missing insurance:    ", round(mean(is.na(sepsis_with_outcome$insurance))*100, 1), "%\n")
 ```
 
 ## 3. Adding Predictors
@@ -359,7 +363,37 @@ labs_summary <- labs_raw |>
 cat("Rows after joining labs:", nrow(labs_summary), "\n")
 ```
 
-### 3.6 Vasopressors (first 24h binary flags)
+### 3.6 GCS (first 24 hr minimum)
+
+```{r}
+### 3.6 GCS (first 24h minimum — lowest score = worst neurological state)
+gcs_raw <- tbl(con_bq, "chartevents") |>
+  filter(
+    itemid %in% c(220739, 223900, 223901),
+    hadm_id %in% !!cohort_ids,
+    !is.na(valuenum)
+  ) |>
+  select(subject_id, hadm_id, itemid, charttime, valuenum) |>
+  inner_join(icu_admissions_bq, by = c("subject_id", "hadm_id")) |>
+  filter(
+    charttime >= intime,
+    charttime <= sql("TIMESTAMP_ADD(intime, INTERVAL 24 HOUR)")
+  ) |>
+  collect() |>
+  group_by(subject_id, hadm_id, itemid) |>
+  summarise(value = min(valuenum, na.rm = TRUE), .groups = "drop") |>
+  pivot_wider(names_from = itemid, values_from = value) |>
+  rename(gcs_eye    = `220739`,
+         gcs_verbal = `223900`,
+         gcs_motor  = `223901`) |>
+  mutate(gcs_total = gcs_eye + gcs_verbal + gcs_motor) |>
+  select(subject_id, hadm_id, gcs_total)
+
+cat("Patients with GCS data:", nrow(gcs_raw), "\n")
+summary(gcs_raw$gcs_total)
+```
+
+### 3.7 Vasopressors (first 24h binary flags)
 
 ```{r}
 
@@ -388,9 +422,11 @@ vasopressor_flags <- vasopressors_raw |>
 cat("Patients with vasopressors in first 24h:", nrow(vasopressor_flags), "\n")
 ```
 
-### 3.7 Safety Check + Joining all Predictors
+### 3.8 Safety Check + Joining all Predictors
 
 ```{r}
+### 3.8 Safety Check + Joining all Predictors
+
 # ICU filter already applied in section 1 — this is just a safety check
 sepsis_icu <- sepsis_with_comorbidities
 
@@ -398,12 +434,15 @@ sepsis_with_vitals <- sepsis_icu |>
   left_join(vitals_summary, by = c("subject_id", "hadm_id"))
 
 sepsis_with_labs <- sepsis_with_vitals |>
-  left_join(labs_summary, by = c("subject_id", "hadm_id")) |>
+  left_join(labs_summary,      by = c("subject_id", "hadm_id")) |>
   left_join(vasopressor_flags, by = c("subject_id", "hadm_id")) |>
-  mutate(vasopressor = replace_na(vasopressor, 0L))
+  left_join(gcs_raw,           by = c("subject_id", "hadm_id")) |>  # added GCS
+  mutate(vasopressor = replace_na(vasopressor, 0L)) |>
+  select(-sbp, -dbp)   # drop multicollinear variables
 
 cat("Final rows:", nrow(sepsis_with_labs), "\n")
 cat("Vasopressor use (%):", round(mean(sepsis_with_labs$vasopressor)*100, 1), "\n")
+cat("GCS missing (%):", round(mean(is.na(sepsis_with_labs$gcs_total))*100, 1), "\n")
 ```
 
 ## 4. Raw Data
@@ -442,47 +481,51 @@ sepsis_with_labs %>%
 sepsis_clean <- sepsis_with_labs |>
   mutate(
     # heart rate: no human survives >300, <20 is incompatible with life
-    heart_rate  = if_else(heart_rate > 300 | heart_rate < 20, 
+    heart_rate  = if_else(heart_rate > 300 | heart_rate < 20,
                           NA_real_, heart_rate),
-    
-    # blood pressures: negative values impossible, >300 is data error
-    sbp         = if_else(sbp < 0 | sbp > 300, NA_real_, sbp),
-    dbp         = if_else(dbp < 0 | dbp > 200, NA_real_, dbp),
-    map         = if_else(map < 0 | map > 200, NA_real_, map),
-    
-    # resp rate: <5 impossible, >80 is data error (not just tachypnea)
-    resp_rate   = if_else(resp_rate < 5 | resp_rate > 80, 
+
+    # map: zero or negative impossible, >200 is data error
+    map         = if_else(map <= 0 | map > 200, NA_real_, map),
+
+    # resp rate: <5 impossible, >80 is data error
+    resp_rate   = if_else(resp_rate < 5 | resp_rate > 80,
                           NA_real_, resp_rate),
-    
+
     # temperature: <25 incompatible with life, >45 lethal/data error
-    temperature = if_else(temperature < 25 | temperature > 45, 
+    temperature = if_else(temperature < 25 | temperature > 45,
                           NA_real_, temperature),
-    
-    # lactate: >30 is beyond any recorded human value, data error
+
+    # lactate: >30 is beyond any recorded human value
     lactate     = if_else(lactate < 0 | lactate > 30, NA_real_, lactate),
-    
-    # wbc: >500 is beyond any recorded human value, data error
+
+    # wbc: >500 is beyond any recorded human value
     wbc         = if_else(wbc > 500, NA_real_, wbc),
-    
+
     # platelets: >3000 is beyond any recorded human value
     platelets   = if_else(platelets > 3000, NA_real_, platelets),
-    
+
     # bilirubin: >150 is beyond any recorded human value
     bilirubin   = if_else(bilirubin > 150, NA_real_, bilirubin),
-    
+
     # creatinine: >50 is beyond any recorded human value
-    creatinine  = if_else(creatinine > 50, NA_real_, creatinine)
+    creatinine  = if_else(creatinine > 50, NA_real_, creatinine),
+
+    # GCS: scale is 3-15 by definition, outside = data error
+    gcs_total   = if_else(gcs_total < 3 | gcs_total > 15,
+                          NA_real_, gcs_total)
   )
 
+# insurance doesn't need outlier cleaning — categorical with fixed levels
+
 # check missingness after cleaning
-# missingness increases slightly — expected, impossible values now correctly NA
 sepsis_clean |>
   summarise(across(everything(), ~ round(mean(is.na(.x)) * 100, 1))) |>
   print(width = Inf)
 
-# verify the crazy values are gone
+# verify crazy values are gone
 summary(sepsis_clean[, c("resp_rate", "lactate", "temperature",
-                          "map", "dbp", "sbp", "wbc", "creatinine")])
+                          "map", "wbc", "creatinine", "gcs_total")])
+
 ```
 
 ## 6. Imputation
@@ -522,22 +565,24 @@ cat("After removing early deaths:", nrow(sepsis_clean), "\n")
 # step 3: fix Inf/-Inf then median impute remaining NAs
 # Inf arises when max/min was called on a patient with ALL NA values in 24h window
 # median chosen over mean due to right-skewed distributions in clinical variables
+# gcs_total: low score = worst neurological state, median impute missing values
 sepsis_imputed <- sepsis_clean |>
   mutate(across(
-    .cols = c(heart_rate, sbp, dbp, map, resp_rate, temperature,
-              creatinine, bilirubin, wbc, platelets, lactate),
+    .cols = c(heart_rate, map, resp_rate, temperature,
+              creatinine, bilirubin, wbc, platelets, lactate, gcs_total),
     ~ if_else(is.infinite(.x), NA_real_, .x)
   )) |>
   mutate(across(
-    .cols = c(heart_rate, sbp, dbp, map, resp_rate, temperature,
-              creatinine, bilirubin, wbc, platelets, lactate),
+    .cols = c(heart_rate, map, resp_rate, temperature,
+              creatinine, bilirubin, wbc, platelets, lactate, gcs_total),
     ~ coalesce(.x, median(.x, na.rm = TRUE))
   ))
 
 # confirm no remaining missingness
 sepsis_imputed |>
-  summarise(across(c(heart_rate, sbp, dbp, map, resp_rate, temperature,
-                     creatinine, bilirubin, wbc, platelets, lactate),
+  summarise(across(c(heart_rate, map, resp_rate, temperature,
+                     creatinine, bilirubin, wbc, platelets, 
+                     lactate, gcs_total),
                    ~ round(mean(is.na(.x)) * 100, 1))) |>
   print()
 
@@ -546,39 +591,50 @@ cat("Duplicate subject_ids:", sum(duplicated(sepsis_imputed$subject_id)), "\n")
 
 ```
 
-## 7. Final Cohort
+## 7. Final Cohort Table
 
 ```{r}
-# final cohort summary
-cat("Total patients:", nrow(sepsis_imputed), "\n")
-cat("Unique subjects:", n_distinct(sepsis_imputed$subject_id), "\n")
-
-# age
-summary(sepsis_imputed$anchor_age)
-
-# gender
-table(sepsis_imputed$gender)
-prop.table(table(sepsis_imputed$gender)) |> round(3)
-
-# race — collapsed proportions
-prop.table(table(sepsis_imputed$race)) |> round(3)
-
-# comorbidities — % of cohort with each
+# final cohort summary using gtsummary
 sepsis_imputed |>
-  summarise(across(c(hypertension, diabetes, ckd, cvd, 
-                     chronic_liver, immunosuppression),
-                   ~ round(mean(.x) * 100, 1))) |>
-  print()
-
-# vasopressor use
-cat("Vasopressor use (%):", round(mean(sepsis_imputed$vasopressor)*100, 1), "\n")
-
-# outcome
-table(sepsis_imputed$prolonged_stay)
-prop.table(table(sepsis_imputed$prolonged_stay)) |> round(3)
-
-# LOS
-summary(sepsis_imputed$los_days)
+  mutate(
+    prolonged_stay = factor(prolonged_stay, labels = c("Normal (<14 days)", "Prolonged (≥14 days)")),
+    gender         = factor(gender),
+    insurance      = factor(insurance),
+    race_collapsed = case_when(
+      str_detect(race, "WHITE")    ~ "WHITE",
+      str_detect(race, "BLACK")    ~ "BLACK",
+      str_detect(race, "HISPANIC") ~ "HISPANIC",
+      str_detect(race, "ASIAN")    ~ "ASIAN",
+      race %in% c("UNKNOWN", "UNABLE TO OBTAIN",
+                  "PATIENT DECLINED TO ANSWER") ~ "UNKNOWN",
+      TRUE ~ "OTHER"
+    ) |> as.factor()
+  ) |>
+  select(anchor_age, gender, race_collapsed, insurance,
+         hypertension, diabetes, ckd, cvd, chronic_liver,
+         immunosuppression, vasopressor, gcs_total,
+         los_days, prolonged_stay) |>
+  tbl_summary(
+    by = prolonged_stay,
+    label = list(
+      anchor_age        ~ "Age (years)",
+      gender            ~ "Gender",
+      race_collapsed    ~ "Race",
+      insurance         ~ "Insurance",
+      hypertension      ~ "Hypertension",
+      diabetes          ~ "Diabetes",
+      ckd               ~ "CKD",
+      cvd               ~ "CVD",
+      chronic_liver     ~ "Chronic Liver Disease",
+      immunosuppression ~ "Immunosuppression",
+      vasopressor       ~ "Vasopressor Use",
+      gcs_total         ~ "GCS Total (first 24h minimum)",
+      los_days          ~ "Length of Stay (days)"
+    )
+  ) |>
+  add_p() |>
+  add_overall() |>
+  bold_labels()
 ```
 
 ## 8. Graphs & Tables
@@ -645,13 +701,15 @@ Model: add race???
 # gender recoded as binary (1 = M, 0 = F)
 # vasopressor: binary flag — received any vasopressor in first 24h of ICU admission
 # model matrix
+#insurance: captures social determinants of health — meaningful variation in prolonged
+#            stay across categories (Other 46.1% vs Medicare 34.1%)
 model_vars <- c("anchor_age", "gender", "race_collapsed", 
-                "heart_rate", "map", "resp_rate",        # dropped sbp and dbp bc multicolinearity
+                "heart_rate", "map", "resp_rate", "gcs_total",        # dropped sbp and dbp bc multicolinearity
                 "temperature", "creatinine", "bilirubin", 
                 "wbc", "platelets", "lactate",
                 "hypertension", "diabetes", "ckd", "cvd",
                 "chronic_liver", "immunosuppression",
-                "vasopressor")
+                "vasopressor", "insurance")
 
 model_df <- sepsis_imputed |>
   mutate(
@@ -764,7 +822,7 @@ results_df <- tibble(
 
 results_df |> gt()
 
-# LASSO selected predictors — variables with non-zero coefficients
+# LASSO selected predictors — define first
 lasso_coefs <- coef(lasso_model) |>
   as.matrix() |>
   as.data.frame() |>
@@ -772,14 +830,11 @@ lasso_coefs <- coef(lasso_model) |>
   filter(Variable != "(Intercept)") |>
   mutate(dropped = if_else(s0 == 0, "DROPPED", "kept"))
 
-# show dropped variables
 cat("Dropped by LASSO:\n")
-lasso_coefs |> filter(dropped == "DROPPED") |> print()
+lasso_coefs |> filter(dropped == "DROPPED") |> pull(Variable) |> print()
 
-# show kept variables
-cat("Kept by LASSO:\n")
-lasso_coefs |> filter(dropped == "kept") |> arrange(desc(abs(s0))) |> print()
-
+cat("\nKept by LASSO:\n")
+lasso_coefs |> filter(dropped == "kept") |> arrange(desc(abs(s0))) |> pull(Variable) |> print()
 ```
 
 ## Graphing ROC Curves
