@@ -145,46 +145,77 @@ sepsis_with_demo <- sepsis_with_outcome
 ```{r}
 cohort_ids <- sepsis_with_demo$hadm_id
 
-# pull secondary diagnoses and flag comorbidities using ICD-10 codes
+# pull secondary diagnoses — both ICD-9 AND ICD-10 to capture all admissions
+# collect AFTER all BQ-side filters
 secondary_dx <- tbl(con_bq, "diagnoses_icd") |>
   filter(
     seq_num > 1,
-    icd_version == 10,
     hadm_id %in% !!cohort_ids
   ) |>
-  select(subject_id, hadm_id, icd_code) |>
+  select(subject_id, hadm_id, icd_code, icd_version) |>
   collect()
 
 comorbidity_flags <- secondary_dx |>
   mutate(
-    hypertension      = if_else(startsWith(icd_code, "I10"), 1L, 0L),
-    diabetes          = if_else(
-                          startsWith(icd_code, "E10") |
-                          startsWith(icd_code, "E11"), 1L, 0L),
-    ckd               = if_else(startsWith(icd_code, "N18"), 1L, 0L),
-    cvd               = if_else(
-                          startsWith(icd_code, "I20") |
-                          startsWith(icd_code, "I21") |
-                          startsWith(icd_code, "I25") |
-                          startsWith(icd_code, "I48") |
-                          startsWith(icd_code, "I50") |
-                          startsWith(icd_code, "I70") |
-                          startsWith(icd_code, "I71"), 1L, 0L),
-    chronic_liver     = if_else(
-                          startsWith(icd_code, "K70") |
-                          startsWith(icd_code, "K73") |
-                          startsWith(icd_code, "K74"), 1L, 0L),
+    # hypertension — ICD-10: I10 | ICD-9: 401-405
+    hypertension = if_else(
+      (icd_version == 10 & startsWith(icd_code, "I10")) |
+      (icd_version == 9  & (startsWith(icd_code, "401") | startsWith(icd_code, "402") |
+                             startsWith(icd_code, "403") | startsWith(icd_code, "404") |
+                             startsWith(icd_code, "405"))),
+      1L, 0L),
+
+    # diabetes — ICD-10: E10/E11 | ICD-9: 250
+    diabetes = if_else(
+      (icd_version == 10 & (startsWith(icd_code, "E10") | startsWith(icd_code, "E11"))) |
+      (icd_version == 9  &  startsWith(icd_code, "250")),
+      1L, 0L),
+
+    # chronic kidney disease — ICD-10: N18 | ICD-9: 585-586
+    ckd = if_else(
+      (icd_version == 10 & startsWith(icd_code, "N18")) |
+      (icd_version == 9  & (startsWith(icd_code, "585") | startsWith(icd_code, "586"))),
+      1L, 0L),
+
+    # cardiovascular disease — ICD-10: I20/I21/I25/I48/I50/I70/I71
+    #                           ICD-9: 410-414/427/428/440/441
+    cvd = if_else(
+      (icd_version == 10 & (
+        startsWith(icd_code, "I20") | startsWith(icd_code, "I21") |
+        startsWith(icd_code, "I25") | startsWith(icd_code, "I48") |
+        startsWith(icd_code, "I50") | startsWith(icd_code, "I70") |
+        startsWith(icd_code, "I71"))) |
+      (icd_version == 9  & (
+        startsWith(icd_code, "410") | startsWith(icd_code, "411") |
+        startsWith(icd_code, "412") | startsWith(icd_code, "413") |
+        startsWith(icd_code, "414") | startsWith(icd_code, "427") |
+        startsWith(icd_code, "428") | startsWith(icd_code, "440") |
+        startsWith(icd_code, "441"))),
+      1L, 0L),
+
+    # chronic liver disease — ICD-10: K70/K73/K74 | ICD-9: 571
+    chronic_liver = if_else(
+      (icd_version == 10 & (
+        startsWith(icd_code, "K70") | startsWith(icd_code, "K73") |
+        startsWith(icd_code, "K74"))) |
+      (icd_version == 9  &  startsWith(icd_code, "571")),
+      1L, 0L),
+
+    # immunosuppression — ICD-10: D80/D81/D83/Z79/Z94/C81-C83/C91/C92
+    #                     ICD-9: 279/V42/V45/200-202/204/205
     immunosuppression = if_else(
-                          startsWith(icd_code, "D80") |
-                          startsWith(icd_code, "D81") |
-                          startsWith(icd_code, "D83") |
-                          startsWith(icd_code, "Z79") |
-                          startsWith(icd_code, "Z94") |
-                          startsWith(icd_code, "C81") |
-                          startsWith(icd_code, "C82") |
-                          startsWith(icd_code, "C83") |
-                          startsWith(icd_code, "C91") |
-                          startsWith(icd_code, "C92"), 1L, 0L)
+      (icd_version == 10 & (
+        startsWith(icd_code, "D80") | startsWith(icd_code, "D81") |
+        startsWith(icd_code, "D83") | startsWith(icd_code, "Z79") |
+        startsWith(icd_code, "Z94") | startsWith(icd_code, "C81") |
+        startsWith(icd_code, "C82") | startsWith(icd_code, "C83") |
+        startsWith(icd_code, "C91") | startsWith(icd_code, "C92"))) |
+      (icd_version == 9  & (
+        startsWith(icd_code, "279") | startsWith(icd_code, "V42") |
+        startsWith(icd_code, "V45") | startsWith(icd_code, "200") |
+        startsWith(icd_code, "201") | startsWith(icd_code, "202") |
+        startsWith(icd_code, "204") | startsWith(icd_code, "205"))),
+      1L, 0L)
   ) |>
   group_by(subject_id, hadm_id) |>
   summarise(across(hypertension:immunosuppression, max), .groups = "drop") |>
@@ -194,13 +225,12 @@ sepsis_with_comorbidities <- sepsis_with_demo |>
   left_join(comorbidity_flags, by = c("subject_id", "hadm_id")) |>
   mutate(across(hypertension:immunosuppression, ~replace_na(.x, 0L)))
 
-# check:
+# check 
 cat("Rows after joining comorbidities: ", nrow(sepsis_with_comorbidities), "\n")
 comorbidity_flags |>
   summarise(across(hypertension:immunosuppression, ~round(mean(.x)*100,1))) |>
-  print()
+  print(width=Inf)
 dim(sepsis_with_comorbidities)
-
 ```
 
 ### 3.3 ICU admission Times
@@ -223,6 +253,8 @@ cat("ICU stays pulled:", nrow(icustays_raw), "\n")
 ```
 
 ### 3.4 Vital Items
+
+which map is being used here (bc there's 2)
 
 ```{r}
 # pull vitals from chartevents within first 24h of ICU admission
@@ -252,6 +284,7 @@ vital_items <- tibble::tibble(
   vital_name = c("heart_rate", "sbp",  "sbp",  "dbp",  "dbp",
                  "map",  "map",  "resp_rate", "temperature", "temperature")
 )
+  #map combined then min of both found which is clincially standard approach
 
 # summarise each vital per admission (worst values)
 vitals_summary <- vitals_raw |>
@@ -383,7 +416,6 @@ summary(gcs_raw$gcs_total)
 ### 3.7 Vasopressors (first 24h binary flags)
 
 ```{r}
-
 # vasopressor itemids — norepinephrine, epinephrine, dopamine, vasopressin, phenylephrine
 vasopressor_ids <- c(221906, 221289, 221662, 222315, 221749)
 
@@ -671,10 +703,6 @@ ggplot(sepsis_imputed, aes(x = anchor_age)) +
          x = "Age (years)", y = "Count") +
     theme_minimal()
 
-# check cleaning: proportion of prolonged stay across pipeline stages
-mean(sepsis_with_labs$prolonged_stay)
-mean(sepsis_clean$prolonged_stay)
-mean(sepsis_imputed$prolonged_stay)
 ```
 
 # Model 1:
@@ -1164,33 +1192,17 @@ sepsis_imputed |>
 ```
 
 ```{r}
-#LASSO coefficient plot:
 
-lasso_coefs |>
-  filter(dropped == "kept") |>
-  arrange(s0) |>
-  mutate(Variable = factor(Variable, levels = Variable),
-         direction = if_else(s0 > 0, "Increases risk", "Decreases risk")) |>
-  ggplot(aes(x = s0, y = Variable, fill = direction)) +
-  geom_col() +
-  scale_fill_manual(values = c("Increases risk" = "salmon",
-                               "Decreases risk" = "aquamarine3")) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  labs(title = "LASSO Coefficients",
-       x = "Coefficient", y = NULL, fill = NULL) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
 ```
 
-Correlation heatmap of predictors
-
 ```{r}
-model_df |>
-  select(where(is.numeric)) |>
-  cor(use = "complete.obs") |>
-  corrplot(method = "color",
-           type = "upper",
-           tl.cex = 0.7,
-           title = "Predictor Correlation Matrix",
-           mar = c(0,0,1,0))
+app_data <- list(
+  cohort      = sepsis_imputed,
+  lasso_model = lasso_model
+)
+
+saveRDS(app_data, "/Users/charlottelee/Documents/biostat-203b-2026-winter/final_project/app_data.rds")
+cat("Saved! File size:", 
+    round(file.size("/Users/charlottelee/Documents/biostat-203b-2026-winter/final_project/app_data.rds")/1e6, 1), 
+    "MB\n")
 ```
