@@ -110,9 +110,7 @@ print(summary(cohort_df$anchor_age))
 
 ```
 
-## 2. Outcome Variable
-
-Outcome (**admissions.csv**)
+## 2. Outcome Variable + 3. Adding Predictors
 
 ```{r}
 # pulls LOS + race + insurance in one query instead of two
@@ -138,19 +136,8 @@ cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
 cat("\n--- Insurance Distribution ---\n")
 table(sepsis_with_outcome$insurance) |> print()
 cat("% missing insurance:    ", round(mean(is.na(sepsis_with_outcome$insurance))*100, 1), "%\n")
-```
-
-## 3. Adding Predictors
-
-### 3.1 Demographics
-
-```{r}
-# race already joined in section 2 — no second BQ pull needed
 sepsis_with_demo <- sepsis_with_outcome
 
-# check:
-cat("Rows after joining demographics: ", nrow(sepsis_with_demo), "\n")
-glimpse(sepsis_with_demo)
 ```
 
 ### 3.2 Comorbidities
@@ -438,7 +425,7 @@ sepsis_with_labs <- sepsis_with_vitals |>
   left_join(vasopressor_flags, by = c("subject_id", "hadm_id")) |>
   left_join(gcs_raw,           by = c("subject_id", "hadm_id")) |>  # added GCS
   mutate(vasopressor = replace_na(vasopressor, 0L)) |>
-  select(-sbp, -dbp)   # drop multicollinear variables
+  select(-sbp, -dbp)   # dropped sbp monitor 1, sdp monitor 2, dbp (both monitors), sbpmulticollinear variables
 
 cat("Final rows:", nrow(sepsis_with_labs), "\n")
 cat("Vasopressor use (%):", round(mean(sepsis_with_labs$vasopressor)*100, 1), "\n")
@@ -694,8 +681,6 @@ mean(sepsis_imputed$prolonged_stay)
 
 ## Logistic Regression: Lasso
 
-Model: add race???
-
 ```{r}
 # race included as categorical predictor — dummy coded automatically by model.matrix
 # gender recoded as binary (1 = M, 0 = F)
@@ -705,8 +690,8 @@ Model: add race???
 #            stay across categories (Other 46.1% vs Medicare 34.1%)
 model_vars <- c("anchor_age", "gender", "race_collapsed",
                 "heart_rate", "map", "resp_rate",
-                "temperature", "creatinine", "bilirubin",
-                "wbc", "platelets", "lactate", "gcs_total",
+                "temperature", "creatinine",
+                "wbc", "platelets", "gcs_total",
                 "hypertension", "diabetes", "ckd", "cvd",
                 "chronic_liver", "immunosuppression",
                 "vasopressor", "insurance")
@@ -762,6 +747,19 @@ X_train <- X[train_idx, ]
 X_test  <- X[-train_idx, ]
 y_train <- y[train_idx]
 y_test  <- y[-train_idx]
+
+# add interaction terms to X:
+X_interact <- model.matrix(
+  ~ . - prolonged_stay - 1 + 
+    chronic_liver:cvd +      # liver disease + cardiovascular disease
+    ckd:diabetes +           # diabetic nephropathy
+    gcs_total:vasopressor,   # neurological impairment + hemodynamic instability
+  data = model_df
+)
+
+# use X_interact instead of X for all models
+X_train_i <- X_interact[train_idx, ]
+X_test_i  <- X_interact[-train_idx, ]
 ```
 
 ```{r}
@@ -771,30 +769,30 @@ y_test  <- y[-train_idx]
 # Elastic Net: mix of LASSO and Ridge
 # LASSO chosen for variable selection despite similar AUC across all models
 
-# plain logistic regression — no penalty, baseline comparison
+# plain logistic regression
 set.seed(42)
-lr_model <- glm(y_train ~ ., data = as.data.frame(X_train), family = "binomial")
-lr_pred  <- predict(lr_model, newdata = as.data.frame(X_test), type = "response")
+lr_model <- glm(y_train ~ ., data = as.data.frame(X_train_i), family = "binomial")
+lr_pred  <- predict(lr_model, newdata = as.data.frame(X_test_i), type = "response")
 
-# LASSO: alpha = 1 — shrinks small coefficients to zero (automatic variable selection)
+# LASSO
 set.seed(42)
-cv_lasso    <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 1, nfolds = 10)
-lasso_model <- glmnet(X_train, y_train, family = "binomial", alpha = 1, lambda = cv_lasso$lambda.min)
-lasso_pred  <- as.numeric(predict(lasso_model, newx = X_test, type = "response"))
+cv_lasso    <- cv.glmnet(X_train_i, y_train, family = "binomial", alpha = 1, nfolds = 10)
+lasso_model <- glmnet(X_train_i, y_train, family = "binomial", alpha = 1, lambda = cv_lasso$lambda.min)
+lasso_pred  <- as.numeric(predict(lasso_model, newx = X_test_i, type = "response"))
 
-# ridge: alpha = 0 — shrinks all coefficients but keeps all predictors
+# ridge
 set.seed(42)
-cv_ridge    <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 0, nfolds = 10)
-ridge_model <- glmnet(X_train, y_train, family = "binomial", alpha = 0, lambda = cv_ridge$lambda.min)
-ridge_pred  <- as.numeric(predict(ridge_model, newx = X_test, type = "response"))
+cv_ridge    <- cv.glmnet(X_train_i, y_train, family = "binomial", alpha = 0, nfolds = 10)
+ridge_model <- glmnet(X_train_i, y_train, family = "binomial", alpha = 0, lambda = cv_ridge$lambda.min)
+ridge_pred  <- as.numeric(predict(ridge_model, newx = X_test_i, type = "response"))
 
-# elastic net: alpha = 0.5 — mix of LASSO and Ridge
+# elastic net
 set.seed(42)
-cv_enet    <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 0.5, nfolds = 10)
-enet_model <- glmnet(X_train, y_train, family = "binomial", alpha = 0.5, lambda = cv_enet$lambda.min)
-enet_pred  <- as.numeric(predict(enet_model, newx = X_test, type = "response"))
+cv_enet    <- cv.glmnet(X_train_i, y_train, family = "binomial", alpha = 0.5, nfolds = 10)
+enet_model <- glmnet(X_train_i, y_train, family = "binomial", alpha = 0.5, lambda = cv_enet$lambda.min)
+enet_pred  <- as.numeric(predict(enet_model, newx = X_test_i, type = "response"))
 
-# compute ROC objects once — suppressMessages cleans up output
+# compute ROC objects once
 roc_lr    <- suppressMessages(roc(y_test, lr_pred))
 roc_lasso <- suppressMessages(roc(y_test, lasso_pred))
 roc_ridge <- suppressMessages(roc(y_test, ridge_pred))
@@ -822,11 +820,10 @@ results_df <- tibble(
   Threshold   = round(c(thresh_lr, thresh_lasso, thresh_ridge, thresh_enet), 3),
   Sensitivity = round(c(m_lr[1], m_lasso[1], m_ridge[1], m_enet[1]), 1),
   Specificity = round(c(m_lr[2], m_lasso[2], m_ridge[2], m_enet[2]), 1)
-) 
-
+)
 results_df |> gt()
 
-# LASSO selected predictors — define first
+# LASSO selected predictors
 lasso_coefs <- coef(lasso_model) |>
   as.matrix() |>
   as.data.frame() |>
@@ -837,8 +834,8 @@ lasso_coefs <- coef(lasso_model) |>
 cat("Dropped by LASSO:\n")
 lasso_coefs |> filter(dropped == "DROPPED") |> pull(Variable) |> print()
 
-cat("\nKept by LASSO:\n")
-lasso_coefs |> filter(dropped == "kept") |> arrange(desc(abs(s0))) |> pull(Variable) |> print()
+cat("\nKept by LASSO:\n") 
+lasso_coefs |> filter(dropped == "kept")|> arrange(desc(abs(s0))) |> pull(Variable) |> print()
 ```
 
 ## Graphing ROC Curves
@@ -857,32 +854,12 @@ roc_df <- bind_rows(
   data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = lab_enet)
 )
 
-# 4 separate graphs
-ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
-  geom_line(lwd = 1) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  facet_wrap(~ Model, ncol = 2) +
-  scale_color_manual(values = setNames(
-    c("cyan", "blue", "magenta", "green"),
-    c(lab_lr, lab_ridge, lab_lasso, lab_enet)
-  )) +
-  labs(
-    title = "ROC Curves by Model",
-    x     = "False Positive Rate (1 - Specificity)",
-    y     = "True Positive Rate (Sensitivity)"
-  ) +
-  theme_minimal() +
-  theme(
-    strip.text      = element_text(face = "bold"),
-    legend.position = "none"
-  )
-
 # combined all 4 into one graph
 ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
   geom_line(lwd = 1) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
   scale_color_manual(values = setNames(
-    c("cyan", "blue", "magenta", "green"),
+    c("yellow", "blue", "green", "red"),
     c(lab_lr, lab_ridge, lab_lasso, lab_enet)
   )) +
   labs(
@@ -892,24 +869,6 @@ ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
-
-
-# combine all ROC curves
-roc_df <- bind_rows(
-  data.frame(FPR = 1 - roc_lr$specificities,    TPR = roc_lr$sensitivities,    Model = paste0("Logistic Regression (AUC=", round(auc_lr,3), ")")),
-  data.frame(FPR = 1 - roc_lasso$specificities,  TPR = roc_lasso$sensitivities,  Model = paste0("LASSO (AUC=", round(auc_lasso,3), ")")),
-  data.frame(FPR = 1 - roc_ridge$specificities,  TPR = roc_ridge$sensitivities,  Model = paste0("Ridge (AUC=", round(auc_ridge,3), ")")),
-  data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = paste0("Elastic Net (AUC=", round(auc_enet,3), ")"))
-)
-ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
-  geom_line(lwd = 1) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  labs(title = "ROC Curves — All Models",
-       x = "False Positive Rate (1 - Specificity)",
-       y = "True Positive Rate (Sensitivity)") +
-  theme_minimal() +
-  theme(legend.position = "bottom",
-        legend.text = element_text(size = 7))
 
 ```
 
@@ -995,7 +954,7 @@ final_rf_fit |> collect_metrics()
 # variable importance plot
 final_rf_fit |>
   extract_fit_parsnip() |>
-  vip(num_features = 21) +
+  vip(num_features = 19) +
   labs(title = "Random Forest Variable Importance")
 
 # ROC curve
@@ -1089,7 +1048,7 @@ final_gb_fit |> collect_metrics()
 # variable importance
 final_gb_fit |>
   extract_fit_parsnip() |>
-  vip(num_features = 21) +
+  vip(num_features = 19) +
   labs(title = "XGBoost Variable Importance")
 
 # ROC curve
