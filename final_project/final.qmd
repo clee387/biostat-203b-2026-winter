@@ -1,9 +1,12 @@
 ---
-title: "Biostat Final Project"
-subtitle: "Due Mar 18 @ 11:59PM"
-author: "Charlotte Lee and 206782165"
+title: "Machine Learning Prediction of Prolonged ICU Stay in Sepsis Patients Using MIMIC-IV"
+subtitle: "Biostat 203B Final Project"
+author: 
+  - name: "Charlotte Lee and 206782165"
+  - name: "Yasmine Tani and Brandon Brushwyler"
+date: "March 20, 2026"
 execute:
-  cache: true         
+  cache: true
 format:
   html:
     theme: cosmo
@@ -14,10 +17,34 @@ format:
     toc-location: left
     code-fold: false
 ---
+# Abstract
 
-## Load Libraries
+250-300 words here
+
+# Introduction
+## Background
+## Literature Review  
+## Problem Statement
+## Objectives
+
+# Methods
+## Data Source
+Display machine information:
 
 ```{r}
+sessionInfo()
+```
+
+Display my machine memory.
+
+```{r}
+memuse::Sys.meminfo()
+```
+
+Load database libraries and the tidyverse frontend:
+
+```{r}
+#| label: setup
 #| cache: false
 #| message: false
 #| warning: false
@@ -30,15 +57,10 @@ library(tidyverse)
 library(glmnet)
 library(pROC)
 library(corrplot)
-
-# Added for RF Model
 library(tidymodels)
 library(ranger)
 library(vip)
-
-# Added for xgboost
 library(xgboost)
-
 library(styler)
 
 ```
