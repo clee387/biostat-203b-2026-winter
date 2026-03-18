@@ -9,11 +9,9 @@ library(glmnet)
 library(gt)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
-app_data     <- readRDS("app_data.rds")
-cohort       <- app_data$cohort
-#cohort_raw   <- app_data$cohort_raw
-lasso_model  <- app_data$lasso_model
-model_vars   <- app_data$model_vars
+app_data    <- readRDS(file.path(dirname(rstudioapi::getSourceEditorContext()$path), "app_data.rds"))
+cohort      <- app_data$cohort
+lasso_model <- app_data$lasso_model
 
 # ── BQ connection ─────────────────────────────────────────────────────────────
 bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
@@ -344,7 +342,7 @@ server <- function(input, output, session) {
             gender         ~ "Gender",
             race_collapsed ~ "Race",
             insurance      ~ "Insurance",
-            los_days       ~ "Length of Stay (days)"
+            los_days       ~ "Length of Stay (LOS, days)"
           )
         ) |>
         add_overall() |>
@@ -610,7 +608,7 @@ server <- function(input, output, session) {
         tags$p(tags$b("Gender: "),        ifelse(pt$gender=="M","Male","Female")),
         tags$p(tags$b("Race: "),          pt$race),
         tags$p(tags$b("Insurance: "),     pt$insurance),
-        tags$p(tags$b("LOS: "),           pt$los_days, " days"),
+        tags$p(tags$b("Length of Stay (LOS): "), pt$los_days, " days"),
         tags$p(tags$b("Vasopressor: "),   ifelse(pt$vasopressor==1,"Yes","No")),
         tags$p(tags$b("Prolonged Stay (>=14 days): "),
                ifelse(pt$prolonged_stay==1,"Yes","No")),
@@ -693,7 +691,7 @@ server <- function(input, output, session) {
                      tags$th("ICU Unit"),
                      tags$th("Admission Time"),
                      tags$th("Discharge Time"),
-                     tags$th("Length of Stay"),
+                     tags$th("Length of Stay (LOS)"),
                      tags$th("Outcome")
                    )
                  ),
