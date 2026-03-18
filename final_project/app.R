@@ -233,17 +233,18 @@ ui <- fluidPage(
                          probability that this patient will have a prolonged ICU stay
                          (>=14 days). The red line marks the decision threshold of 40.2%
                          — patients above this are classified as high risk.")),
-                         p(HTML("<b>Clinical application:</b> A high-risk prediction suggests
-                         early discharge planning, proactive resource allocation, and
-                         closer monitoring may be warranted. A low-risk prediction
-                         supports standard care pathways.")),
+                         p(HTML("<b>Clinical application:</b> A high-risk prediction may prompt
+                         earlier clinical review of discharge planning and care
+                         coordination. A low-risk prediction supports standard
+                         care pathways.")),
                          p(HTML("<b>Limitations:</b> This model was trained on a single-center
                          ICU cohort (MIMIC-IV, Beth Israel Deaconess Medical Center) and
-                         may not generalize to other institutions. AUC = 0.680 reflects
-                         moderate discriminative ability. Additionally, the model uses
-                         first-admission worst-case values and may not capture dynamic
-                         changes in patient status over time. Clinical judgment should
-                         always supplement model predictions."),
+                         may not generalize to other institutions. AUC = 0.680 indicates
+                         the model performs better than chance at distinguishing prolonged
+                         from normal stays. The model uses first-admission worst-case
+                         values and may not capture dynamic changes in patient status
+                         over time. Clinical judgment should always supplement
+                         model predictions."),
                            style="color:#888;font-style:italic;")
                      )
                  ),
@@ -259,29 +260,33 @@ ui <- fluidPage(
                          increase predicted risk; negative (teal) bars decrease it.
                          Variables shrunk to zero by LASSO are not shown.")),
                          p(HTML("<b>Key findings:</b> Chronic liver disease and cardiovascular
-                         disease are the strongest individual risk factors. Insurance
-                         type and race capture social determinants of health independent
-                         of clinical severity. GCS and vasopressor use capture
-                         neurological and hemodynamic severity. The large negative
-                         coefficient for Insurance: Unknown may reflect that patients
-                         with unresolved insurance documentation have shorter recorded
-                         stays, though the mechanism warrants further investigation.")),
-                         p(HTML("<b>For clinicians and hospitals:</b> Comorbidity burden —
-                         particularly liver disease and CVD — drives prolonged stay
-                         more than acute physiological derangements alone. This suggests
-                         pre-admission health status should be a key focus in discharge
-                         planning conversations, and that hospitals may benefit from
-                         targeted early intervention programs for high-comorbidity
-                         sepsis patients."),
+                         disease had the largest positive coefficients. Insurance type
+                         and race show associations with prolonged stay beyond clinical
+                         predictors alone. The large negative coefficient for
+                         Insurance: Unknown may reflect documentation patterns rather
+                         than true clinical differences.")),
+                         p(HTML("<b>Clinical relevance:</b> Comorbidity burden at admission —
+                         particularly liver disease and CVD — appears to be an important
+                         factor in prolonged stay, suggesting these patients may benefit
+                         from earlier discharge planning conversations."),
                            style="color:#555;")
                      )
+                 ),
+                 br(),
+                 div(style="background:#f8f9fa;border-radius:6px;
+                            padding:8px 12px;border-left:3px solid #667eea;
+                            font-size:0.82em;color:#6c757d;",
+                     tags$b("Model selection note: ", style="color:#667eea;"),
+                     "LASSO (AUC = 0.680) was chosen over XGBoost (AUC = 0.683)
+                      for this tool due to its interpretable coefficients, which
+                      allow clinicians to understand individual predictor contributions.
+                      All six models performed comparably (AUC 0.677-0.683)."
                  )
                )
              )
     )
   )
 )
-
 # SERVER
 server <- function(input, output, session) {
   
@@ -587,7 +592,7 @@ server <- function(input, output, session) {
     
     comorbid_vars  <- c("hypertension","diabetes","ckd","cvd",
                         "chronic_liver","immunosuppression")
-    comorbid_names <- c("Hypertension","Diabetes","CKD","CVD",
+    comorbid_names <- c("Hypertension","Diabetes","Chronic Kidney Disease (CKD)","Cardiovascular Disease (CVD)",
                         "Chronic Liver","Immunosuppression")
     flags  <- tryCatch(as.logical(unlist(pt[comorbid_vars])),
                        error=function(e) rep(FALSE,6))
@@ -722,12 +727,12 @@ server <- function(input, output, session) {
     vitals <- vitals |>
       mutate(
         charttime   = as.POSIXct(charttime),
-        vital_label = recode(abbreviation,
-                             "HR"    = "Heart Rate (bpm)",
-                             "ABPm"  = "MAP (mmHg)",
-                             "NBPm"  = "MAP (mmHg)",
-                             "RR"    = "Resp Rate (/min)",
-                             "TempC" = "Temperature (deg C)"
+        vital_label = case_when(
+          abbreviation == "HR"            ~ "Heart Rate (bpm)",
+          abbreviation %in% c("ABPm", "NBPm") ~ "MAP (mmHg)",
+          abbreviation == "RR"            ~ "Resp Rate (/min)",
+          abbreviation == "Temperature C" ~ "Temperature (deg C)",
+          TRUE                            ~ abbreviation
         )
       ) |>
       filter(!is.na(valuenum))
