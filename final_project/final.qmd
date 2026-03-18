@@ -1163,7 +1163,7 @@ sepsis_imputed |>
 ```
 
 ```{r}
-# ── RF Diagnosis Plot ─────────────────────────────────────────────────────────
+# RF Diagnosis Plot — confirms trees range was appropriate
 rf_fit |>
   collect_metrics() |>
   filter(.metric == "roc_auc") |>
@@ -1171,11 +1171,12 @@ rf_fit |>
   ggplot(aes(x=trees, y=mean, color=mtry, group=mtry)) +
   geom_line() + geom_point() +
   geom_errorbar(aes(ymin=mean-std_err, ymax=mean+std_err), width=0.2) +
-  labs(title="RF Tuning Diagnosis",
-       x="Trees", y="CV AUC") +
+  labs(title="Random Forest CV Tuning — Hyperparameter Diagnostic",
+       subtitle="Best mtry=3 at trees=400, interior to grid — range was appropriate",
+       x="Number of Trees", y="CV AUC") +
   theme_minimal()
-rf_fit
-# ── XGBoost Diagnosis Plot ────────────────────────────────────────────────────
+
+# XGBoost Diagnosis Plot — confirmed learn_rate range needed narrowing
 gb_fit |>
   collect_metrics() |>
   filter(.metric == "roc_auc") |>
@@ -1184,85 +1185,10 @@ gb_fit |>
   geom_point() + geom_line() +
   scale_x_log10() +
   geom_errorbar(aes(ymin=mean-std_err, ymax=mean+std_err), width=0.1) +
-  labs(title="XGBoost Tuning — is best learn_rate at boundary?",
-       subtitle="If best learn_rate is at edge of range, expand",
+  labs(title="XGBoost CV Tuning — Hyperparameter Diagnostic",
+       subtitle="Peak at learn_rate~0.006, interior to narrowed range — grid was appropriate",
        x="Learning Rate (log scale)", y="CV AUC") +
   theme_minimal()
-
-# ── Expanded RF Grid ──────────────────────────────────────────────────────────
-rf_mod_v2 <- rand_forest(
-  mode  = "classification",
-  mtry  = tune(),
-  trees = tune(),
-  min_n = tune()
-) |> set_engine("ranger", importance="impurity")
-
-param_grid_rf_v2 <- grid_regular(
-  trees(range = c(200L, 500L)),
-  mtry(range  = c(1L, 8L)),
-  min_n(range = c(2L, 20L)),
-  levels = c(3, 5, 3)
-)
-
-rf_wf_v2 <- workflow() |>
-  add_recipe(rf_recipe) |>
-  add_model(rf_mod_v2)
-
-set.seed(42)
-rf_fit_v2 <- rf_wf_v2 |>
-  tune_grid(
-    resamples = folds,
-    grid      = param_grid_rf_v2,
-    metrics   = metric_set(roc_auc)
-  )
-
-rf_fit_v2 |> show_best(metric="roc_auc")
-
-# ── Expanded XGBoost Grid ─────────────────────────────────────────────────────
-gb_mod_v2 <- boost_tree(
-  mode       = "classification",
-  trees      = 1000,
-  tree_depth = tune(),
-  learn_rate = tune(),
-  mtry       = tune(),
-  min_n      = tune()
-) |> set_engine("xgboost")
-
-param_grid_gb_v2 <- grid_regular(
-  tree_depth(range = c(1L, 6L)),
-  learn_rate(range = c(-4, -1), trans = log10_trans()),
-  mtry(range  = c(3L, 15L)),
-  min_n(range = c(5L, 30L)),
-  levels = c(3, 5, 3, 3)
-)
-
-gb_wf_v2 <- workflow() |>
-  add_recipe(gb_recipe) |>
-  add_model(gb_mod_v2)
-
-set.seed(42)
-gb_fit_v2 <- gb_wf_v2 |>
-  tune_grid(
-    resamples = folds,
-    grid      = param_grid_gb_v2,
-    metrics   = metric_set(roc_auc)
-  )
-
-gb_fit_v2 |> show_best(metric="roc_auc")
-
-# ── Compare All Models ────────────────────────────────────────────────────────
-cat("=== CURRENT RESULTS ===\n")
-cat("Logistic Regression AUC:", 0.678, "\n")
-cat("LASSO AUC:",               0.680, "\n")
-cat("RF v1 AUC:",        round(rf_auc, 3), "\n")
-cat("XGBoost v1 AUC:",   round(gb_auc, 3), "\n")
-
-cat("\n=== EXPANDED TUNING ===\n")
-cat("RF v2 best CV AUC:",
-    rf_fit_v2 |> show_best(metric="roc_auc", n=1) |> pull(mean) |> round(3), "\n")
-cat("XGBoost v2 best CV AUC:",
-    gb_fit_v2 |> show_best(metric="roc_auc", n=1) |> pull(mean) |> round(3), "\n")
-
 ```
 
 ```{r}
