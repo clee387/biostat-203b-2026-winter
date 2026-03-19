@@ -491,11 +491,13 @@ server <- function(input, output, session) {
         add_histogram(data=d_normal,
                       x=as.formula(paste0("~`",var,"`")),
                       name="Normal (<14 days)",
-                      marker=list(color=normal_color)) |>
+                      marker=list(color=normal_color,
+                                  line=list(color="white", width=0.5))) |>
         add_histogram(data=d_prolonged,
                       x=as.formula(paste0("~`",var,"`")),
                       name="Prolonged Stay (>=14 days)",
-                      marker=list(color=prolonged_color)) |>
+                      marker=list(color=prolonged_color,
+                                  line=list(color="white", width=0.5))) |>
         layout(barmode="overlay",
                xaxis=list(title="Value"), yaxis=list(title="Count"),
                legend=list(orientation="h", xanchor="center", x=0.5,

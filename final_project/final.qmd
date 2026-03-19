@@ -11,24 +11,37 @@ format:
   html:
     theme: cosmo
     embed-resources: true
-    number-sections: false
+    number-sections: true
     toc: true
     toc-depth: 4
     toc-location: left
     code-fold: false
 ---
+
 # Abstract
 
-250-300 words here
+Sepsis is a life-threatening condition and a major cause of Intensive Care Unit (ICU) admission and mortality worldwide. Patients with sepsis who experience prolonged ICU stays (≥14 days) face worse outcomes and increased healthcare costs, yet few studies have developed prediction tools specifically targeting extended length of stay at the time of ICU admission.
+
+This study evaluates six machine learning models for predicting prolonged ICU stay in adult sepsis patients using retrospective data from the MIMIC-IV Clinical Database (n = 4,179). Predictors included first 24-hour worst-case vital signs, laboratory values, demographics, comorbidities derived from ICD-9 and ICD-10 codes, and three clinically motivated interaction terms (CKD×Diabetes, Chronic Liver×CVD, GCS×Vasopressor). Missing values were handled through mean imputation for symmetric variables and median imputation for skewed variables. Models compared included logistic regression, LASSO, Ridge, Elastic Net, Random Forest, and XGBoost, evaluated using AUC and Youden-optimal thresholds on a held-out 20% test set.
+
+XGBoost achieved the highest AUC (0.683), closely followed by Ridge (0.681) and LASSO (0.680). Random Forest performed comparably (AUC = 0.677). Differences across models were minimal (range 0.677– 0.683), suggesting predominantly linear relationships between predictors and prolonged stay. Key predictors included chronic liver disease, cardiovascular disease, Glasgow Coma Scale score, and insurance type. LASSO retained the CKD×Diabetes interaction while dropping diabetes as a main effect, consistent with diabetic nephropathy as the clinically meaningful entity.
+
+These findings suggest that comorbidity burden at admission drives prolonged ICU stay more than acute physiological derangements alone, and that simpler interpretable models perform comparably to complex nonlinear approaches. Given its comparable performance and interpretable coefficients, LASSO was selected for clinical deployment in the accompanying prediction application.
 
 # Introduction
+
 ## Background
-## Literature Review  
+
+## Literature Review
+
 ## Problem Statement
+
 ## Objectives
 
 # Methods
+
 ## Data Source
+
 Display machine information:
 
 ```{r}
@@ -63,6 +76,8 @@ library(vip)
 library(xgboost)
 library(styler)
 
+# Style my current file
+#styler::style_file("final_project/final.qmd")
 ```
 
 ## Connect to The Data
@@ -79,9 +94,63 @@ con_bq <- dbConnect(
 )
 ```
 
-# Data Cleaning + Pre-Processing
+Data were obtained from MIMIC-IV (Medical Information Mart for Intensive Care), a large single-center critical care database containing de-identified electronic health records from Beth Israel Deaconess Medical Center (BIDMC) in Boston, MA. MIMIC-IV contains data from over 50,000 ICU admissions and includes diagnoses, laboratory results, vital signs, medications, and administrative data. Access to MIMIC-IV requires completion of a data use agreement and CITI human subjects training through PhysioNet, ensuring appropriate credentialing and privacy protections. Data were accessed via Google BigQuery using the `bigrquery` and `dbplyr` R packages, enabling SQL-based querying of large tables without loading full datasets into memory. All filtering and aggregation were performed server-side on BigQuery before collecting results, consistent with best practices for handling large-scale clinical databases.
 
-## 1. Filtering out Age (\>=18) & Primary Sepsis Diagnosis (upon admission) & ICU patients only
+**Inclusion criteria:** Adult patients (age ≥18) with a primary sepsis diagnosis (ICD-9 or ICD-10, sequence number = 1) admitted to the ICU. Only the first qualifying admission per patient was retained to satisfy the independence assumption of logistic regression.
+
+**Exclusion criteria.** Patients who were flagged to have died within 48 hours of ICU admission were excluded to address competing risk bias, these patients cannot by definition have a prolonged stay, and their inclusion would cause high-severity markers to appear falsely protective. 
+
+```{r}
+# cohort flow - how many patients at each step
+cohort_flow <- tibble(
+  Step = c(
+    "Adult sepsis ICU admissions",
+    "After outcome filter (LOS > 0)",
+    "After first admission filter",
+    "After 48h early death exclusion",
+    "Final analytic cohort"
+  ),
+  N = c(5017, 4953, 4478, 4179, 4179),
+  label = c(
+    "5,017",
+    "4,953 (-64 same-day discharges)",
+    "4,478 (-475 duplicate admissions)",
+    "4,179 (-299 early deaths)",
+    "4,179 (final)"
+  )
+) |>
+  mutate(Step = factor(Step, levels = rev(Step)))
+
+ggplot(cohort_flow, aes(x = N, y = Step)) +
+  geom_col(fill = "steelblue", width = 0.5) +
+  geom_text(aes(label = label), hjust = -0.05, size = 3.5) +
+  labs(title = "Cohort Construction Flow",
+       x = "Number of Patients", y = NULL) +
+  xlim(0, 9000) +   # increased to fit long labels
+  theme_minimal()
+```
+
+## Variables and Features
+
+**Outcome:** Prolonged ICU stay, defined as hospital length of stay ≥14 days (binary: 1 = prolonged, 0 = normal).
+
+**Predictors (19 total):**
+
+**Vital signs (4):** Maximum heart rate, minimum mean arterial pressure (MAP), maximum respiratory rate, and maximum temperature during the first 24 hours of ICU admission. Worst-case values were used consistent with severity scoring conventions (APACHE II, SOFA). MAP was selected over systolic and diastolic blood pressure due to its use as the primary hemodynamic target in the Surviving Sepsis Campaign (MAP \>65 mmHg) and its inclusion in SOFA scoring. SBP and DBP were excluded as multicollinear with MAP.
+
+**Laboratory values (3):** Maximum creatinine, maximum white blood cell count (WBC), and minimum platelets during **the first 24 hours. Bilirubin and lactate were excluded after sensitivity analysis showed no change in predictive performance (AUC 0.680 with and without), and both had \>15% missingness with patterns consistent with missing-not-at-random in ICU settings.**
+
+**Neurological (1):** Minimum Glasgow Coma Scale (GCS) total score during the first 24 hours, capturing neurological severity not represented by other predictors.
+
+**Demographics (3):** Age, gender (binary: male = 1), and race (collapsed to White, Black, Hispanic, Asian, Other, Unknown). \*Social determinants (1):\* Insurance type (Medicare, Medicaid, Private, Other, Unknown), which showed a 12% difference in prolonged stay prevalence across categories.
+
+**Comorbidities (7)**: Hypertension, diabetes, chronic kidney disease (CKD), cardiovascular disease (CVD), chronic liver disease, immunosuppression, and vasopressor use — all derived from ICD-9 and ICD-10 secondary diagnosis codes or medication administration records.
+
+**Interaction terms (3):** CKD×Diabetes (diabetic nephropathy), Chronic Liver×CVD (cardiohepatic syndrome), and GCS×Vasopressor (combined neurological and hemodynamic instability). These were included based on clinical reasoning that the joint presence of these conditions represents syndromes with distinct prognostic implications beyond their main effects.
+
+**Pre-processing:** Outlier removal was performed by setting physiologically impossible values to missing (NA). Bounds were defined at biological limits — not clinical abnormality thresholds — to remove data entry errors while preserving true disease severity. Specific bounds applied were: heart rate (\<20 or \>300 bpm), mean arterial pressure (≤0 or \>200 mmHg), respiratory rate (\<5 or \>80 breaths/min), temperature (\<25°C or \>45°C), lactate (\>30 mmol/L), white blood cell count (\>500 K/µL), platelets (\>3,000 K/µL), creatinine (\>50 mg/dL), and Glasgow Coma Scale total (\<3 or \>15, as the scale is defined over this range by construction). Insurance type did not require outlier cleaning as it is categorical with fixed levels. Extreme values that were retained — such as respiratory rate of 73, WBC of 267, and temperature of 42.5°C — reflect physiologically possible values in severely ill sepsis patients. Following outlier removal, remaining missing values were imputed using the column median computed from the full cohort.
+
+### Sepsis Diagnosis and Adult Filter
 
 ```{r}
 # load raw tables
@@ -115,6 +184,11 @@ sepsis_adult_cohort_tbl <- sepsis_cohort_tbl |>
 
 cohort_df <- sepsis_adult_cohort_tbl |> collect()
 
+```
+
+### ICU Patients
+
+```{r}
 # restrict to ICU patients only upfront
 icu_hadm_ids <- tbl(con_bq, "icustays") |>
   select(hadm_id) |>
@@ -125,16 +199,6 @@ icu_hadm_ids <- tbl(con_bq, "icustays") |>
 cohort_df <- cohort_df |>
   filter(hadm_id %in% icu_hadm_ids)
 
-# check:
-cat("Total admissions: ", nrow(cohort_df), "\n")
-cat("Unique patients:  ", n_distinct(cohort_df$subject_id), "\n")
-print(summary(cohort_df$anchor_age))
-
-```
-
-## 2. Outcome Variable + 3. Adding Predictors
-
-```{r}
 # pulls LOS + race + insurance in one query instead of two
 admissions_tbl <- tbl(con_bq, "admissions") |>
   select(subject_id, hadm_id, admittime, dischtime, race, insurance) |>
@@ -146,23 +210,9 @@ sepsis_with_outcome <- cohort_df |>
   inner_join(admissions_tbl, by = c("subject_id", "hadm_id")) |>
   filter(!is.na(los_days), los_days > 0) |>
   mutate(prolonged_stay = if_else(los_days >= 14, 1L, 0L))
-
-# check:
-cat("Total admissions:       ", nrow(sepsis_with_outcome), "\n")
-cat("Unique patients:        ", n_distinct(sepsis_with_outcome$subject_id), "\n")
-cat("Prolonged stay (>=14d): ", sum(sepsis_with_outcome$prolonged_stay), "\n")
-cat("% prolonged:            ", round(mean(sepsis_with_outcome$prolonged_stay)*100, 1), "%\n")
-cat("Median LOS:             ", median(sepsis_with_outcome$los_days), "days\n")
-
-# insurance check
-cat("\n--- Insurance Distribution ---\n")
-table(sepsis_with_outcome$insurance) |> print()
-cat("% missing insurance:    ", round(mean(is.na(sepsis_with_outcome$insurance))*100, 1), "%\n")
-sepsis_with_demo <- sepsis_with_outcome
-
 ```
 
-### 3.2 Comorbidities
+### Comorbidities
 
 ```{r}
 cohort_ids <- sepsis_with_demo$hadm_id
@@ -255,7 +305,7 @@ comorbidity_flags |>
 dim(sepsis_with_comorbidities)
 ```
 
-### 3.3 ICU admission Times
+### ICU admission Times
 
 ```{r}
 ### 3.3 ICU Admission Times (for 24h vital/lab windows)
@@ -274,9 +324,7 @@ icu_admissions <- icustays_raw
 cat("ICU stays pulled:", nrow(icustays_raw), "\n")
 ```
 
-### 3.4 Vital Items
-
-which map is being used here (bc there's 2)
+### Vital Items
 
 ```{r}
 # pull vitals from chartevents within first 24h of ICU admission
@@ -332,28 +380,18 @@ vitals_summary <- vitals_raw |>
     .groups = "drop"
   ) |>
   pivot_wider(names_from = vital_name, values_from = value)
-# check
-cat("Rows after joining vitals:", nrow(vitals_summary), "\n")
-
-# may take up to a minute to run
 ```
 
-### 3.5 Lab Events
+### Lab Events
 
 ```{r}
-#Confirm Lab Items: 
-# verify all lab itemids are correct
-#tbl(con_bq, "d_labitems") |>
- # filter(itemid %in% c(50912, 50885, 51301, 51265, 50813)) |>
-#  select(itemid, label) |>
-#  arrange(itemid) |>
-#  collect() |>
-#  print()
-
 # pull labs from labevents within first 24h of ICU admission
+# creatinine (50912), WBC (51301), platelets (51265) only
+# bilirubin and lactate excluded after sensitivity analysis showed
+# no change in predictive performance (AUC 0.680 with and without)
 labs_raw <- tbl(con_bq, "labevents") |>
   filter(
-    itemid %in% c(50912, 50885, 51301, 51265, 50813),
+    itemid %in% c(50912, 51301, 51265),
     hadm_id %in% !!cohort_ids,
     !is.na(valuenum)
   ) |>
@@ -363,49 +401,30 @@ labs_raw <- tbl(con_bq, "labevents") |>
     charttime >= intime,
     charttime <= sql("TIMESTAMP_ADD(intime, INTERVAL 24 HOUR)")
   ) |>
-  collect()   # collect AFTER all filters
+  collect()
 
-# map itemids to lab names
 lab_items <- tibble::tibble(
-  itemid   = c(50912,        50885,       51301,  51265,       50813),
-  lab_name = c("creatinine", "bilirubin", "wbc",  "platelets", "lactate")
+  itemid   = c(50912,        51301,  51265),
+  lab_name = c("creatinine", "wbc",  "platelets")
 )
 
-# worst values per admission
 labs_summary <- labs_raw |>
   left_join(lab_items, by = "itemid") |>
   group_by(subject_id, hadm_id, lab_name) |>
   summarise(
     value = case_when(
-      # MAX — peak creatinine indicates worst kidney function
-      # (higher creatinine = more kidney damage)
       first(lab_name) == "creatinine" ~ max(valuenum),
-      
-      # MAX — peak bilirubin indicates worst liver function
-      # (higher bilirubin = more liver damage/dysfunction)
-      first(lab_name) == "bilirubin"  ~ max(valuenum),
-      
-      # MAX — peak WBC indicates worst infection/inflammatory response
-      # (very high WBC = severe infection)
       first(lab_name) == "wbc"        ~ max(valuenum),
-      
-      # MIN — lowest platelets is most dangerous
-      # (low platelets = coagulopathy/DIC risk, common in severe sepsis)
-      first(lab_name) == "platelets"  ~ min(valuenum),
-      
-      # MAX — peak lactate indicates worst tissue perfusion
-      # (high lactate = cells not getting enough oxygen = septic shock)
-      first(lab_name) == "lactate"    ~ max(valuenum),
+      first(lab_name) == "platelets"  ~ min(valuenum)
     ),
     .groups = "drop"
   ) |>
   pivot_wider(names_from = lab_name, values_from = value)
 
-# check
 cat("Rows after joining labs:", nrow(labs_summary), "\n")
 ```
 
-### 3.6 GCS (first 24 hr minimum)
+### Glasgow Coma Scale (first 24 hr minimum)
 
 ```{r}
 ### 3.6 GCS (first 24h minimum — lowest score = worst neurological state)
@@ -435,7 +454,7 @@ cat("Patients with GCS data:", nrow(gcs_raw), "\n")
 summary(gcs_raw$gcs_total)
 ```
 
-### 3.7 Vasopressors (first 24h binary flags)
+### Vasopressors (first 24h binary flags)
 
 ```{r}
 # vasopressor itemids — norepinephrine, epinephrine, dopamine, vasopressin, phenylephrine
@@ -463,10 +482,10 @@ vasopressor_flags <- vasopressors_raw |>
 cat("Patients with vasopressors in first 24h:", nrow(vasopressor_flags), "\n")
 ```
 
-### 3.8 Safety Check + Joining all Predictors
+### Joining all Predictors
 
 ```{r}
-### 3.8 Safety Check + Joining all Predictors
+# Safety Check + Joining all Predictors
 
 # ICU filter already applied in section 1 — this is just a safety check
 sepsis_icu <- sepsis_with_comorbidities
@@ -486,11 +505,11 @@ cat("Vasopressor use (%):", round(mean(sepsis_with_labs$vasopressor)*100, 1), "\
 cat("GCS missing (%):", round(mean(is.na(sepsis_with_labs$gcs_total))*100, 1), "\n")
 ```
 
-## 4. Raw Data
+### Check Raw Data
 
 ```{r}
 #raw data view
-summary(sepsis_with_labs)
+#summary(sepsis_with_labs)
 
 # check
 cat("raw final dataset:", nrow(sepsis_icu), "\n")
@@ -502,16 +521,14 @@ sepsis_with_labs %>%
   print(width = Inf)
 ```
 
-## 5. Outlier Cleaning
+### Outlier Cleaning
 
 ```{r}
 # Outlier cleaning note:
 # bounds set at physiologically IMPOSSIBLE limits, not clinical abnormality limits
 # goal is to remove data entry errors while preserving true disease severity
-# e.g. lactate of 28 mmol/L is a real critically ill patient — kept
-#      lactate of 1,276,103 is clearly a data entry error — removed
-# SBP/MAP/DBP lower bound set to >0 (not >=0) since zero BP = death/error
-# resp_rate max 73, wbc max 267, lactate max 29.6 retained as physiologically 
+# MAP lower bound set to >0 (not >=0) since zero BP = death/error
+# resp_rate max 73, wbc max 267 retained as physiologically 
 # possible extreme values in severely ill sepsis patients
 # temperature max 42.5C retained as real severe fever
 
@@ -536,17 +553,11 @@ sepsis_clean <- sepsis_with_labs |>
     temperature = if_else(temperature < 25 | temperature > 45,
                           NA_real_, temperature),
 
-    # lactate: >30 is beyond any recorded human value
-    lactate     = if_else(lactate < 0 | lactate > 30, NA_real_, lactate),
-
     # wbc: >500 is beyond any recorded human value
     wbc         = if_else(wbc > 500, NA_real_, wbc),
 
     # platelets: >3000 is beyond any recorded human value
     platelets   = if_else(platelets > 3000, NA_real_, platelets),
-
-    # bilirubin: >150 is beyond any recorded human value
-    bilirubin   = if_else(bilirubin > 150, NA_real_, bilirubin),
 
     # creatinine: >50 is beyond any recorded human value
     creatinine  = if_else(creatinine > 50, NA_real_, creatinine),
@@ -564,12 +575,12 @@ sepsis_clean |>
   print(width = Inf)
 
 # verify crazy values are gone
-summary(sepsis_clean[, c("resp_rate", "lactate", "temperature",
+summary(sepsis_clean[, c("resp_rate", "temperature",
                           "map", "wbc", "creatinine", "gcs_total")])
 
 ```
 
-## 6. Imputation
+### Imputation
 
 ```{r}
 # step 1: keep first admission per patient
@@ -624,7 +635,7 @@ sepsis_imputed |>
   summarise(across(c(heart_rate, map, resp_rate, temperature,
                      creatinine, bilirubin, wbc, platelets, 
                      lactate, gcs_total),
-                   ~ round(mean(is.na(.x)) * 100, 1))) |>
+                   ~ round(median(is.na(.x)) * 100, 1))) |>
   print()
 
 cat("Final patients:", nrow(sepsis_imputed), "\n")
@@ -632,104 +643,22 @@ cat("Duplicate subject_ids:", sum(duplicated(sepsis_imputed$subject_id)), "\n")
 
 ```
 
-## 7. Final Cohort Table
+## Analytic Approach and Modeling
 
-```{r}
-# final cohort summary using gtsummary
-sepsis_imputed |>
-  mutate(
-    prolonged_stay = factor(prolonged_stay, labels = c("Normal (<14 days)", "Prolonged (≥14 days)")),
-    gender         = factor(gender),
-    insurance      = factor(insurance),
-    race_collapsed = case_when(
-      str_detect(race, "WHITE")    ~ "WHITE",
-      str_detect(race, "BLACK")    ~ "BLACK",
-      str_detect(race, "HISPANIC") ~ "HISPANIC",
-      str_detect(race, "ASIAN")    ~ "ASIAN",
-      race %in% c("UNKNOWN", "UNABLE TO OBTAIN",
-                  "PATIENT DECLINED TO ANSWER") ~ "UNKNOWN",
-      TRUE ~ "OTHER"
-    ) |> as.factor()
-  ) |>
-  select(anchor_age, gender, race_collapsed, insurance,
-         hypertension, diabetes, ckd, cvd, chronic_liver,
-         immunosuppression, vasopressor, gcs_total,
-         los_days, prolonged_stay) |>
-  tbl_summary(
-    by = prolonged_stay,
-    label = list(
-      anchor_age        ~ "Age (years)",
-      gender            ~ "Gender",
-      race_collapsed    ~ "Race",
-      insurance         ~ "Insurance",
-      hypertension      ~ "Hypertension",
-      diabetes          ~ "Diabetes",
-      ckd               ~ "CKD",
-      cvd               ~ "CVD",
-      chronic_liver     ~ "Chronic Liver Disease",
-      immunosuppression ~ "Immunosuppression",
-      vasopressor       ~ "Vasopressor Use",
-      gcs_total         ~ "GCS Total (first 24h minimum)",
-      los_days          ~ "Length of Stay (days)"
-    )
-  ) |>
-  add_p() |>
-  add_overall() |>
-  bold_labels()
-```
+**Index time:** ICU admission. The prediction window was the first 24 hours of ICU admission, using worst-case values to capture peak physiological derangement.
 
-## 8. Graphs & Tables
+**Models:** Six classification models were trained and compared:
 
-```{r}
-# raw data: sepsis_with_labs --> outcome distribution
-sepsis_with_labs |>
-    count(prolonged_stay) |>
-    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
-           pct = round(n / sum(n) * 100, 1)) |>
-    ggplot(aes(x = label, y = n, fill = label)) +
-    geom_col(width = 0.5) +
-    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
-              vjust = -0.5, size = 4) +
-    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
-                                 "Normal (≤14 days)"    = "aquamarine2")) +
-    labs(title = "Pre-Imputation: Outcome Distribution: Prolonged Hospital Stay",
-         x = NULL, y = "Number of Patients") +
-    theme_minimal() +
-    theme(legend.position = "none")
+1.  *Logistic Regression* — baseline linear model
+2.  *LASSO* (α = 1) — L1 penalization for automatic variable selection
+3.  *Ridge* (α = 0) — L2 penalization retaining all predictors
+4.  *Elastic Net* (α = 0.5) — combination of L1 and L2 penalties
+5.  *Random Forest* — ensemble of decision trees with bootstrap aggregation
+6.  *XGBoost* — gradient boosted trees with sequential error correction
 
-# sepsis_imputed: outcome distribution
-sepsis_imputed |>
-    count(prolonged_stay) |>
-    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
-           pct = round(n / sum(n) * 100, 1)) |>
-    ggplot(aes(x = label, y = n, fill = label)) +
-    geom_col(width = 0.5) +
-    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
-              vjust = -0.5, size = 4) +
-    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
-                                 "Normal (≤14 days)"    = "aquamarine")) +
-    labs(title = "Post-Imputation: Outcome Distribution: Prolonged Hospital Stay",
-         x = NULL, y = "Number of Patients") +
-    theme_minimal() +
-    theme(legend.position = "none")
+All models were implemented in R using the `glmnet` package for regularized regression and the `tidymodels` framework for Random Forest (`ranger`) and XGBoost (`xgboost`).
 
-# sepsis_imputed: age distribution
-ggplot(sepsis_imputed, aes(x = anchor_age)) +
-    geom_histogram(binwidth = 5, fill = "lightblue", color = "white") +
-    geom_vline(xintercept = mean(sepsis_imputed$anchor_age), 
-               linetype = "dashed", color = "red", linewidth = 0.8) +
-    annotate("text", x = mean(sepsis_imputed$anchor_age) + 2, y = 300,
-             label = paste0("Mean: ", round(mean(sepsis_imputed$anchor_age), 1)),
-             color = "red", hjust = 0) +
-    labs(title = "Age Distribution of ICU Sepsis Cohort",
-         x = "Age (years)", y = "Count") +
-    theme_minimal()
-
-```
-
-# Model 1:
-
-## Logistic Regression: Lasso
+## Model Matrix
 
 ```{r}
 # race included as categorical predictor — dummy coded automatically by model.matrix
@@ -812,6 +741,8 @@ X_train_i <- X_interact[train_idx, ]
 X_test_i  <- X_interact[-train_idx, ]
 ```
 
+### Logistic Regression (Simple, LASSO, Ridge, Elastic Net)
+
 ```{r}
 # LASSO logistic regression: same as logistic regression but penalizes 
 # small coefficients to zero — automatic variable selection
@@ -819,7 +750,7 @@ X_test_i  <- X_interact[-train_idx, ]
 # Elastic Net: mix of LASSO and Ridge
 # LASSO chosen for variable selection despite similar AUC across all models
 
-# plain logistic regression
+# simple logistic regression (no regulization)
 set.seed(42)
 lr_model <- glm(y_train ~ ., data = as.data.frame(X_train_i), family = "binomial")
 lr_pred  <- predict(lr_model, newdata = as.data.frame(X_test_i), type = "response")
@@ -888,41 +819,7 @@ cat("\nKept by LASSO:\n")
 lasso_coefs |> filter(dropped == "kept")|> arrange(desc(abs(s0))) |> pull(Variable) |> print()
 ```
 
-## Graphing ROC Curves
-
-```{r}
-# build roc_df from test set ROC objects
-lab_lr    <- paste0("Logistic Regression\nAUC = ", round(auc_lr, 3))
-lab_ridge <- paste0("Ridge\nAUC = ", round(auc_ridge, 3))
-lab_lasso <- paste0("LASSO\nAUC = ", round(auc_lasso, 3))
-lab_enet  <- paste0("Elastic Net\nAUC = ", round(auc_enet, 3))
-
-roc_df <- bind_rows(
-  data.frame(FPR = 1 - roc_lr$specificities,    TPR = roc_lr$sensitivities,    Model = lab_lr),
-  data.frame(FPR = 1 - roc_ridge$specificities,  TPR = roc_ridge$sensitivities,  Model = lab_ridge),
-  data.frame(FPR = 1 - roc_lasso$specificities,  TPR = roc_lasso$sensitivities,  Model = lab_lasso),
-  data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = lab_enet)
-)
-
-# combined all 4 into one graph
-ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
-  geom_line(lwd = 1) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  scale_color_manual(values = setNames(
-    c("yellow", "blue", "green", "red"),
-    c(lab_lr, lab_ridge, lab_lasso, lab_enet)
-  )) +
-  labs(
-    title = "ROC Curves by Model",
-    x     = "False Positive Rate (1 - Specificity)",
-    y     = "True Positive Rate (Sensitivity)"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-```
-
-# Random Forest for Classification Model
+### Random Forest for Classification Model
 
 ```{r}
 # ── Random Forest ─────────────────────────────────────────────────────────────
@@ -1008,7 +905,7 @@ cat("Random Forest Test AUC:", round(rf_auc, 3), "\n")
 
 ```
 
-# XG Boost Model
+### XG Boost Model
 
 ```{r}
 # ── XGBoost ───────────────────────────────────────────────────────────────────
@@ -1087,102 +984,13 @@ gb_auc <- final_gb_fit |>
 cat("XGBoost Test AUC:", round(gb_auc, 3), "\n")
 ```
 
-1.  Cohort flow diagram
+## 4.4 Model Evaluation
 
-```{r}
-# cohort flow - how many patients at each step
-cohort_flow <- tibble(
-  Step = c(
-    "Adult sepsis ICU admissions",
-    "After outcome filter (LOS > 0)",
-    "After first admission filter",
-    "After 48h early death exclusion",
-    "Final analytic cohort"
-  ),
-  N = c(5017, 4953, 4478, 4179, 4179),
-  label = c(
-    "5,017",
-    "4,953 (-64 same-day discharges)",
-    "4,478 (-475 duplicate admissions)",
-    "4,179 (-299 early deaths)",
-    "4,179 (final)"
-  )
-) |>
-  mutate(Step = factor(Step, levels = rev(Step)))
+**Train/test split:** An 80/20 stratified split was used (n = 3,343 training, n = 836 test), stratified on the outcome to preserve class balance.
 
-ggplot(cohort_flow, aes(x = N, y = Step)) +
-  geom_col(fill = "steelblue", width = 0.5) +
-  geom_text(aes(label = label), hjust = -0.05, size = 3.5) +
-  labs(title = "Cohort Construction Flow",
-       x = "Number of Patients", y = NULL) +
-  xlim(0, 9000) +   # increased to fit long labels
-  theme_minimal()
-```
+**Cross-validation:** 5-fold cross-validation was used for hyperparameter tuning of Random Forest (mtry, trees) and XGBoost (tree_depth, learn_rate).
 
-2.  Key predictor distributions by outcome:
-
-```{r}
-# key continuous predictors based on LASSO + clinical importance
-sepsis_imputed |>
-  pivot_longer(
-    cols = c(gcs_total, creatinine, lactate, 
-             temperature, map, anchor_age),
-    names_to  = "variable",
-    values_to = "value"
-  ) |>
-  mutate(
-    prolonged_stay = factor(prolonged_stay,
-                            labels = c("Normal (<14d)", "Prolonged (≥14d)")),
-    variable = recode(variable,
-      gcs_total   = "GCS Total",
-      creatinine  = "Creatinine",
-      lactate     = "Lactate",
-      temperature = "Temperature",
-      map         = "MAP",
-      anchor_age  = "Age"
-    )
-  ) |>
-  ggplot(aes(x = value, fill = prolonged_stay)) +
-  geom_density(alpha = 0.5) +
-  facet_wrap(~ variable, scales = "free", ncol = 3) +
-  scale_fill_manual(values = c("aquamarine3", "salmon")) +
-  labs(title = "Distribution of Key Continuous Predictors by Outcome",
-       x = NULL, y = "Density", fill = "Outcome") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
-
-3.  Comorbidity prevalence by outcome:
-
-```{r}
-sepsis_imputed |>
-  mutate(prolonged_stay = factor(prolonged_stay,
-                                  labels = c("Normal", "Prolonged"))) |>
-  group_by(prolonged_stay) |>
-  summarise(across(c(hypertension, diabetes, ckd, cvd,
-                     chronic_liver, immunosuppression, vasopressor),
-                   ~ round(mean(.x) * 100, 1))) |>
-  pivot_longer(-prolonged_stay, 
-               names_to = "comorbidity", 
-               values_to = "pct") |>
-  mutate(comorbidity = recode(comorbidity,
-    hypertension      = "Hypertension",
-    diabetes          = "Diabetes",
-    ckd               = "CKD",
-    cvd               = "CVD",
-    chronic_liver     = "Chronic Liver",
-    immunosuppression = "Immunosuppression",
-    vasopressor       = "Vasopressor"
-  )) |>
-  ggplot(aes(x = reorder(comorbidity, pct), y = pct, fill = prolonged_stay)) +
-  geom_col(position = "dodge", width = 0.6) +
-  coord_flip() +
-  scale_fill_manual(values = c("aquamarine3", "salmon")) +
-  labs(title = "Comorbidity Prevalence by Outcome",
-       x = NULL, y = "Prevalence (%)", fill = "Outcome") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
+**Hyperparameter tuning:** Initial tuning ranges were informed by diagnostic plots of CV AUC against hyperparameter values. For Random Forest, the trees range was expanded from 100–300 to 200–500 after diagnostic plots showed an upward trend at the boundary. For XGBoost, the learning rate range was narrowed from (1e-5, 100) to (1e-5, 1) after diagnostic plots revealed AUC collapsed for learn_rate \> 1, concentrating grid points in the effective region.
 
 ```{r}
 # RF Diagnosis Plot — confirms trees range was appropriate
@@ -1213,7 +1021,228 @@ gb_fit |>
   theme_minimal()
 ```
 
+**Performance metrics:** Area under the ROC curve (AUC) was the primary metric. Decision thresholds were selected using the Youden index (maximizing sensitivity + specificity - 1). Sensitivity and specificity at the optimal threshold are reported for each model.
+
+# Results
+
+## 5.1 Cohort Characteristics
+
+The final analytic cohort comprised 4,179 adult sepsis ICU patients after applying all inclusion and exclusion criteria. Of these, 1,575 (37.7%) experienced prolonged ICU stays (≥14 days). The cohort had a median age of 65 years, was 57% male, and was predominantly White (61%). Medicare was the most common insurance type (52%). Hypertension (52%) and cardiovascular disease (38%) were the most prevalent comorbidities. Vasopressor use in the first 24 hours was recorded in 34% of patients.
+
 ```{r}
+# final cohort summary using gtsummary
+sepsis_imputed |>
+  mutate(
+    prolonged_stay = factor(prolonged_stay, labels = c("Normal (<14 days)", "Prolonged (≥14 days)")),
+    gender         = factor(gender, levels = c("F", "M"), 
+                labels = c("Female", "Male")),
+    insurance      = factor(insurance),
+    race_collapsed = case_when(
+      str_detect(race, "WHITE")    ~ "WHITE",
+      str_detect(race, "BLACK")    ~ "BLACK",
+      str_detect(race, "HISPANIC") ~ "HISPANIC",
+      str_detect(race, "ASIAN")    ~ "ASIAN",
+      race %in% c("UNKNOWN", "UNABLE TO OBTAIN",
+                  "PATIENT DECLINED TO ANSWER") ~ "UNKNOWN",
+      TRUE ~ "OTHER"
+    ) |> as.factor()
+  ) |>
+  select(anchor_age, gender, race_collapsed, insurance,
+         hypertension, diabetes, ckd, cvd, chronic_liver,
+         immunosuppression, vasopressor, gcs_total,
+         los_days, prolonged_stay) |>
+  tbl_summary(
+    by = prolonged_stay,
+    statistic = list(
+      all_continuous()  ~ "{median} ({p25}-{p75}); {mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(all_continuous() ~ 1),
+    label = list(
+      anchor_age        ~ "Age (years)",
+      gender            ~ "Gender",
+      race_collapsed    ~ "Race",
+      insurance         ~ "Insurance",
+      hypertension      ~ "Hypertension",
+      diabetes          ~ "Diabetes",
+      ckd               ~ "Chronic Kidney Disease (CKD)",
+      cvd               ~ "Cardiovascular Disease (CVD)",
+      chronic_liver     ~ "Chronic Liver Disease",
+      immunosuppression ~ "Immunosuppression",
+      vasopressor       ~ "Vasopressor Use",
+      gcs_total         ~ "Glasgow Coma Scale (GCS) Total",
+      los_days          ~ "Length of Stay (LOS, days)"
+    )
+  ) |>
+add_p() |>
+  add_overall() |>
+  bold_labels() |>
+  modify_footnote(
+    all_stat_cols() ~ "Continuous: Median (Q1-Q3); Mean (SD). Categorical: n (%)"
+  )
+
+# Density Plot of continuous variables
+sepsis_imputed |>
+  pivot_longer(
+    cols = c(gcs_total, creatinine, wbc,
+             temperature, map, anchor_age,
+             heart_rate, resp_rate, platelets),
+    names_to  = "variable",
+    values_to = "value"
+  ) |>
+  mutate(
+    prolonged_stay = factor(prolonged_stay,
+                            labels = c("Normal (<14 days)", "Prolonged (≥14 days)")),
+    variable = recode(variable,
+      gcs_total   = "Glasgow Coma Scale (GCS) Total",
+      creatinine  = "Creatinine (mg/dL)",
+      wbc         = "WBC (K/uL)",
+      temperature = "Temperature (deg C)",
+      map         = "MAP (mmHg)",
+      anchor_age  = "Age (years)",
+      heart_rate  = "Heart Rate (bpm)",
+      resp_rate   = "Respiratory Rate (/min)",
+      platelets   = "Platelets (K/uL)"
+    )
+  ) |>
+  ggplot(aes(x = value, fill = prolonged_stay)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ variable, scales = "free", ncol = 3) +
+  scale_fill_manual(values = c("aquamarine3", "salmon")) +
+  labs(title = "Distribution of Key Continuous Predictors by Outcome",
+       x = NULL, y = "Density", fill = "Outcome") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        strip.text = element_text(size = 9),
+        panel.spacing = unit(1, "lines"))
+
+# Comorbidity Prevalence by Outcome
+sepsis_imputed |>
+  mutate(prolonged_stay = factor(prolonged_stay,
+                                  labels = c("Normal (<14 days)", 
+                                             "Prolonged (≥14 days)"))) |>
+  group_by(prolonged_stay) |>
+  summarise(across(c(hypertension, diabetes, ckd, cvd,
+                     chronic_liver, immunosuppression, vasopressor),
+                   ~ round(mean(.x) * 100, 1))) |>
+  pivot_longer(-prolonged_stay,
+               names_to = "comorbidity",
+               values_to = "pct") |>
+  mutate(comorbidity = recode(comorbidity,
+    hypertension      = "Hypertension",
+    diabetes          = "Diabetes",
+    ckd               = "Chronic Kidney Disease (CKD)",
+    cvd               = "Cardiovascular Disease (CVD)",
+    chronic_liver     = "Chronic Liver Disease",
+    immunosuppression = "Immunosuppression",
+    vasopressor       = "Vasopressor Use"
+  )) |>
+  ggplot(aes(x = reorder(comorbidity, pct), y = pct, fill = prolonged_stay)) +
+  geom_col(position = "dodge", width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("aquamarine3", "salmon")) +
+  labs(title = "Comorbidity Prevalence by Outcome",
+       x = NULL, y = "Prevalence (%)", fill = "Outcome") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## 5.2 Model Performance
+
+All six models demonstrated comparable discriminative performance on the held-out test set (AUC range 0.677–0.683). XGBoost achieved the highest test AUC (0.683) following diagnostic-guided hyperparameter refinement. Ridge regression (0.681) and LASSO (0.680) performed comparably. Random Forest achieved an AUC of 0.677, modestly below the regularized regression models.
+
+```{r}
+#[INSERT TABLE: Model Performance Table (AUC, Threshold, Sensitivity, Specificity)] 
+```
+
+```{r}
+# build roc_df from test set ROC objects
+lab_lr    <- paste0("Logistic Regression\nAUC = ", round(auc_lr, 3))
+lab_ridge <- paste0("Ridge\nAUC = ", round(auc_ridge, 3))
+lab_lasso <- paste0("LASSO\nAUC = ", round(auc_lasso, 3))
+lab_enet  <- paste0("Elastic Net\nAUC = ", round(auc_enet, 3))
+
+roc_df <- bind_rows(
+  data.frame(FPR = 1 - roc_lr$specificities,    TPR = roc_lr$sensitivities,    Model = lab_lr),
+  data.frame(FPR = 1 - roc_ridge$specificities,  TPR = roc_ridge$sensitivities,  Model = lab_ridge),
+  data.frame(FPR = 1 - roc_lasso$specificities,  TPR = roc_lasso$sensitivities,  Model = lab_lasso),
+  data.frame(FPR = 1 - roc_enet$specificities,   TPR = roc_enet$sensitivities,   Model = lab_enet)
+)
+
+# combined all 4 into one graph
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(lwd = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = setNames(
+    c("yellow", "blue", "green", "red"),
+    c(lab_lr, lab_ridge, lab_lasso, lab_enet)
+  )) +
+  labs(
+    title = "ROC Curves by Model",
+    x     = "False Positive Rate (1 - Specificity)",
+    y     = "True Positive Rate (Sensitivity)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+The narrow range of AUC values across all models (0.006 difference between best and worst) suggests that the relationships between predictors and prolonged stay are predominantly linear, and that increasing model complexity did not yield meaningful performance gains in this dataset.
+
+## 5.3 Feature Importance
+
+LASSO variable selection retained 23 of 28 model matrix columns, dropping race_collapsedASIAN, race_collapsedUNKNOWN, diabetes (main effect), immunosuppression, and insurancePrivate. Notably, all three interaction terms were retained, with the CKD×Diabetes interaction kept while diabetes as a main effect was dropped — consistent with diabetic nephropathy as the clinically meaningful entity rather than diabetes alone. Chronic liver disease and cardiovascular disease had the largest positive LASSO coefficients, indicating the strongest association with prolonged stay. Insurance: Unknown had the largest negative coefficient, likely reflecting documentation patterns rather than true clinical differences.
+
+```{r}
+#nneeed my coefficient plot!!
+#[INSERT FIGURE: LASSO Coefficient Plot] 
+```
+
+Random Forest and XGBoost variable importance plots both identified GCS total, age, and platelets as the top continuous predictors, consistent with LASSO findings.
+
+```{r}
+#[INSERT FIGURE: Random Forest Variable Importance Plot] 
+
+#[INSERT FIGURE: XGBoost Variable Importance Plot]
+```
+
+## 8. Graphs & Tables
+
+```{r}
+# raw data: sepsis_with_labs --> outcome distribution
+sepsis_with_labs |>
+    count(prolonged_stay) |>
+    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
+           pct = round(n / sum(n) * 100, 1)) |>
+    ggplot(aes(x = label, y = n, fill = label)) +
+    geom_col(width = 0.5) +
+    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
+              vjust = -0.5, size = 4) +
+    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
+                                 "Normal (≤14 days)"    = "aquamarine2")) +
+    labs(title = "Pre-Imputation: Outcome Distribution: Prolonged Hospital Stay",
+         x = NULL, y = "Number of Patients") +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+# sepsis_imputed: outcome distribution
+sepsis_imputed |>
+    count(prolonged_stay) |>
+    mutate(label = if_else(prolonged_stay == 1, "Prolonged (>14 days)", "Normal (≤14 days)"),
+           pct = round(n / sum(n) * 100, 1)) |>
+    ggplot(aes(x = label, y = n, fill = label)) +
+    geom_col(width = 0.5) +
+    geom_text(aes(label = paste0(n, " (", pct, "%)")), 
+              vjust = -0.5, size = 4) +
+    scale_fill_manual(values = c("Prolonged (>14 days)" = "salmon",
+                                 "Normal (≤14 days)"    = "aquamarine")) +
+    labs(title = "Post-Imputation: Outcome Distribution: Prolonged Hospital Stay",
+         x = NULL, y = "Number of Patients") +
+    theme_minimal() +
+    theme(legend.position = "none")
+```
+
+```{r}
+#saving to rds file
 app_data <- list(
   cohort      = sepsis_imputed,
   lasso_model = lasso_model
