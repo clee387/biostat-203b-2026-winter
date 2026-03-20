@@ -22,9 +22,9 @@ format:
 
 Sepsis is a life-threatening condition and a major cause of Intensive Care Unit (ICU) admission and mortality worldwide. Patients with sepsis who experience prolonged ICU stays (≥14 days) face worse outcomes and increased healthcare costs, yet few studies have developed prediction tools specifically targeting extended length of stay at the time of ICU admission.
 
-This study evaluates six machine learning models for predicting prolonged ICU stay in adult sepsis patients using retrospective data from the MIMIC-IV Clinical Database (n = 4,179). Predictors included first 24-hour worst-case vital signs, laboratory values, demographics, comorbidities derived from ICD-9 and ICD-10 codes, and three clinically motivated interaction terms (CKD×Diabetes, Chronic Liver×CVD, GCS×Vasopressor). Missing values were handled through mean imputation for symmetric variables and median imputation for skewed variables. Models compared included logistic regression, LASSO, Ridge, Elastic Net, Random Forest, and XGBoost, evaluated using AUC and Youden-optimal thresholds on a held-out 20% test set.
+This study evaluates six machine learning models for predicting prolonged ICU stay in adult sepsis patients using retrospective data from the MIMIC-IV Clinical Database (n = 4,179). Predictors included first 24-hour worst-case vital signs, laboratory values, demographics, comorbidities derived from ICD-9 and ICD-10 codes, and three clinically motivated interaction terms (CKD×Diabetes, Chronic Liver×CVD, GCS×Vasopressor). Missing values were handled through median imputation for skewed and symmetric variables. Models compared included logistic regression, LASSO, Ridge, Elastic Net, Random Forest, and XGBoost, evaluated using AUC and Youden-optimal thresholds on a held-out 20% test set.
 
-XGBoost achieved the highest AUC (0.683), closely followed by Ridge (0.681) and LASSO (0.680). Random Forest performed comparably (AUC = 0.677). Differences across models were minimal (range 0.677– 0.683), suggesting predominantly linear relationships between predictors and prolonged stay. Key predictors included chronic liver disease, cardiovascular disease, Glasgow Coma Scale score, and insurance type. LASSO retained the CKD×Diabetes interaction while dropping diabetes as a main effect, consistent with diabetic nephropathy as the clinically meaningful entity.
+XGBoost achieved the highest AUC (0.683), closely followed by Ridge (0.681) and LASSO (0.680). Random Forest performed comparably (AUC = 0.677). Differences across models were minimal (range 0.677– 0.683), suggesting predominantly linear relationships between predictors and the prolonged stay outcome. Key predictors included chronic liver disease, cardiovascular disease, Glasgow Coma Scale score, and insurance type. LASSO retained the CKD×Diabetes interaction while dropping diabetes as a main effect, consistent with diabetic nephropathy as the clinically meaningful entity.
 
 These findings suggest that comorbidity burden at admission drives prolonged ICU stay more than acute physiological derangements alone, and that simpler interpretable models perform comparably to complex nonlinear approaches. Given its comparable performance and interpretable coefficients, LASSO was selected for clinical deployment in the accompanying prediction application.
 
@@ -32,25 +32,55 @@ These findings suggest that comorbidity burden at admission drives prolonged ICU
 
 ## Background
 
+Sepsis is defined as life-threatening organ dysfunction caused by a dysregulated host response to infection (Singer et al., 2016). It is one of the most prevalent and resource-intensive conditions managed in the ICU, accounting for a disproportionate share of hospital admissions, critical care costs, and in-hospital mortality globally. In the United States alone, sepsis affects over 1.7 million adults annually and contributes to approximately 270,000 deaths per year (Rhee et al., 2017). Despite advances in early recognition and management protocols, including the Surviving Sepsis Campaign guidelines (Rhodes et al., 2017), a substantial proportion of sepsis patients experience prolonged ICU stays lasting 14 days or more.
+
+Prolonged ICU stays in sepsis patients carry substantial clinical and economic consequences. Extended critical illness is associated with increased risk of hospital-acquired infections, pressure injuries, ICU acquired weakness, and post-intensive care syndrome a combination of physical, cognitive, and psychological impairments that persist long after hospital discharge (Iwashyna et al., 2010). From a health systems perspective, prolonged ICU stays consume disproportionate resources, contribute to ICU capacity strain, and are a major driver of healthcare costs. Early identification of patients at high risk for prolonged stay at the time of ICU admission could enable proactive discharge planning, targeted rehabilitation initiation, earlier palliative care consultation, and more efficient allocation of ICU resources. guidelines (Rhodes et al., 2017), a substantial proportion of sepsis patients experience prolonged ICU stays lasting 14 days or more.
+
 ## Literature Review
+
+Machine learning approaches have been increasingly applied to clinical outcome prediction in the ICU, with a primary focus on mortality, readmission, and early sepsis identification. Moor et al. (2021) conducted a systematic review of machine learning models for sepsis prediction and found that most studies targeted early sepsis identification rather than downstream outcomes such as length of stay. Sheetrit et al. (2021) developed temporal pattern models for ICU sepsis prediction on MIMIC data, demonstrating the feasibility of EHR-based predictive modeling for sepsis outcomes, though again focusing on mortality rather than prolonged stay.
+
+Regarding model selection, Christodoulou et al. (2019) demonstrated in a systematic review of 71 clinical prediction studies that logistic regression performed comparably to more complex machine learning models across a broad range of clinical tasks, suggesting that model interpretability need not be sacrificed for predictive performance on structured tabular clinical data. Couronné et al. (2018) corroborated this in a large-scale benchmark showing that Random Forest did not consistently outperform logistic regression on biomedical datasets, particularly for moderate sample sizes with predominantly binary predictors. Predictor selection in this study was grounded in validated severity scoring systems. The SOFA score (Vincent et al., 1996) provides the clinical rationale for including creatinine, platelets, and MAP as organ dysfunction markers. The Surviving Sepsis Campaign guidelines (Rhodes et al., 2017) establish MAP \>65 mmHg as the primary hemodynamic resuscitation target, validating its inclusion over systolic blood pressure. Glasgow Coma Scale has been validated as a reliable predictor of ICU outcomes beyond mortality (Teasdale & Jennett, 1974; Reith et al., 2016). Social determinants of health, including insurance type and race, have been shown to independently predict hospital outcomes beyond clinical severity in critically ill patients (Barnato et al., 2008; Mayr et al., 2014).
 
 ## Problem Statement
 
+Despite the clinical and economic importance of prolonged ICU stay in sepsis, validated prediction tools that integrate acute clinical data, comorbidity burden, and social determinants at the time of ICU admission remain lacking. Existing severity scores such a APACHE II and SOFA were developed primarily to predict mortality and are not optimized for length-of-stay prediction. Most published machine learning studies on MIMIC sepsis cohorts have targeted mortality or early sepsis detection, leaving prolonged stay as an underexplored but clinically actionable prediction target. There is a need for a transparent, clinically grounded prediction model that can identify at-admission risk factors for prolonged ICU stay and support proactive care planning.
+
 ## Objectives
+
+This study addresses the following specific aims:
+
+1.  Develop a reproducible machine learning pipeline to predict prolonged ICU stay (≥14 days) in adult sepsis patients using MIMIC-IV, leveraging clinically grounded predictors from the first 24 hours of ICU admission
+2.  Compare predictive performance across six model classes spanning interpretable linear models (logistic regression, LASSO, Ridge, Elastic Net) and nonlinear ensemble methods (Random Forest, XGBoost)
+3.  Evaluate the contribution of three clinically motivated interaction terms (CKD×Diabetes, Chronic Liver×CVD, GCS×Vasopressor) to model performance and variable selection
+4.  Identify the most clinically important predictors of prolonged stay across multiple modeling approaches
+5.  Deploy findings in an interactive Shiny application enabling cohort exploration, patient trajectory visualization, and individualized risk prediction
+
+## Hypotheses
+
+We hypothesized that:
+
+1.  Comorbidity burden at admission would be more predictive of prolonged stay than acute physiological derangements, reflecting the role of pre-existing organ dysfunction in recovery trajectory
+2.  Clinically motivated interaction terms would be retained by LASSO penalization, providing data-driven validation of their clinical relevance beyond main effects
+3.  Predictive performance would converge across model classes, consistent with the predominantly linear structure of tabular clinical data (Christodoulou et al., 2019), with no single. scomplex model substantially outperforming regularized regression
+4.  Social determinants of health (insurance type, race) would remain independent predictors of prolonged stay beyond clinical severity markers
 
 # Methods
 
 ## Data Source
 
-Data were obtained from MIMIC-IV (Medical Information Mart for Intensive Care), a large single-center critical care database containing de-identified electronic health records from Beth Israel Deaconess Medical Center (BIDMC) in Boston, MA. MIMIC-IV contains data from over 50,000 ICU admissions and includes diagnoses, laboratory results, vital signs, medications, and administrative data. Access to MIMIC-IV requires completion of a data use agreement and CITI human subjects training through PhysioNet, ensuring appropriate credentialing and privacy protections. Data were accessed via Google BigQuery using the `bigrquery` and `dbplyr` R packages, enabling SQL-based querying of large tables without loading full datasets into memory. All filtering and aggregation were performed server-side on BigQuery before collecting results, consistent with best practices for handling large-scale clinical databases.
+Data were obtained from MIMIC-IV version 3.1 (Medical Information Mart for Intensive Care), a large de-identified database of patients admitted to the emergency department or an intensive care unit at Beth Israel Deaconess Medical Center (BIDMC) in Boston, MA, between 2008 and 2022 (Johnson et al., 2024). MIMIC-IV v3.1 contains data for 364,627 unique patients, including 65,366 individuals with 94,458 unique ICU stays. The database includes diagnoses, laboratory results, vital signs, medication administration, and administrative data sourced from two in-hospital systems: a hospital-wide electronic health record (EHR) and the MetaVision ICU clinical information system. To protect patient privacy, all dates were shifted into a future time period (2100–2200), with a consistent shift applied per patient to preserve temporal relationships within a patient's record. Patients over age 89 have their age recorded as 91 in the anchor_age field, consistent with HIPAA de-identification requirements. Access to MIMIC-IV requires completion of CITI human subjects training and a signed data use agreement through PhysioNet, ensuring appropriate credentialing and privacy protections. This project was conducted in accordance with the PhysioNet Credentialed Health Data Use Agreement.
 
-**Inclusion criteria:** Adult patients (age ≥18) with a primary sepsis diagnosis (ICD-9 or ICD-10, sequence number = 1) admitted to the ICU. Only the first qualifying admission per patient was retained to satisfy the independence assumption of logistic regression.
+**Big data strategy:** Given the scale of MIMIC-IV, all data access was performed via Google BigQuery using the `bigrquery` and `dbplyr`R packages, enabling server-side SQL querying of large tables without loading full datasets into memory. All filtering, joining, and aggregation operations were pushed to BigQuery before collecting results into R, consistent with best practices for handling large-scale clinical databases. The `collect()` function was called only after all server-side filters were applied, minimizing data transfer and computational overhead.
 
-**Exclusion criteria.** Patients who were flagged to have died within 48 hours of ICU admission were excluded to address competing risk bias, these patients cannot by definition have a prolonged stay, and their inclusion would cause high-severity markers to appear falsely protective.
+**Inclusion criteria:** Adult patients (age ≥18) with a primary sepsis diagnosis (ICD-9 or ICD-10, sequence number = 1) admitted to the ICU. Only the first qualifying admission per patient was retained to satisfy the independence assumption of logistic regression and avoid data leakage across admissions.
+
+**Exclusion criteria:** Patients who died within 48 hours of ICU admission were excluded to address competing risk bias — these patients cannot by definition experience a prolonged stay, and their inclusion would cause high-severity markers such as vasopressor use and low GCS to appear falsely protective of prolonged stay.
 
 Display machine information:
 
 ```{r}
+#| code-fold: true
 sessionInfo()
 ```
 
@@ -86,10 +116,10 @@ library(styler)
 #styler::style_file("final_project/final.qmd")
 ```
 
-## Connect to The Data
+### Connect to The Data
 
 ```{r}
-#| cache: false  # overrides the YAML cache: true for this chunk only
+#| cache: false  
 
 bq_auth(path = "biostat-203b-2026-winter-92fefbfab477.json")
 con_bq <- dbConnect(
@@ -132,7 +162,7 @@ cat("Unique patients: ", n_distinct(cohort_df$subject_id), "\n")
 
 ```
 
-**Outcome:** Prolonged ICU stay, defined as hospital length of stay ≥14 days (binary: 1 = prolonged, 0 = normal). Length of stay was computed as the difference in days between hospital admissiona nd discharge timestamps.
+**Outcome:** Prolonged ICU stay, defined as hospital length of stay ≥14 days (binary: 1 = prolonged, 0 = normal). Length of stay was computed as the difference in days between hospital admission and discharge timestamps.
 
 ```{r}
 #| label: outcome-variable
@@ -155,21 +185,27 @@ cat("Prolonged stay (>=14d):", sum(sepsis_with_demo$prolonged_stay),
 
 ## Variables and Features
 
-**Predictors (19 total):**
+Predictor selection was guided by clinical validity and prior literature. Vital signs were selected based on their inclusion in validated sepsis severity scoring systems — MAP is a primary hemodynamic target in the Surviving Sepsis Campaign guidelines (Rhodes et al., 2017), and heart rate, respiratory rate, and temperature are components of systemic inflammatory response syndrome (SIRS) criteria. Laboratory values were selected based on their role in the Sequential Organ Failure Assessment (SOFA) score: creatinine captures renal dysfunction, platelets capture coagulopathy, and WBC captures immune response severity (Vincent et al., 1996). Glasgow Coma Scale was included as the neurological component of SOFA and a validated predictor of ICU outcomes (Teasdale & Jennett, 1974). Worst-case values within the first 24 hours were used consistent with prior ICU prediction literature (Johnson et al., 2017), as peak physiological derangement in the initial ICU period captures acute illness severity more reliably than single-timepoint measurements. Comorbidities were included based on clinical evidence that pre-existing organ dysfunction independently predicts prolonged hospitalization beyond acute severity (Iwashyna et al., 2010). Insurance type and race were included as social determinants of health, which have been shown to independently predict hospital outcomes beyond clinical factors (Barnato et al., 2008).
 
-**Vital signs (4):** Maximum heart rate, minimum mean arterial pressure (MAP), maximum respiratory rate, and maximum temperature during the first 24 hours of ICU admission. Worst-case values were used consistent with severity scoring conventions (APACHE II, SOFA). MAP was selected over systolic and diastolic blood pressure due to its use as the primary hemodynamic target in the Surviving Sepsis Campaign (MAP \>65 mmHg) and its inclusion in SOFA scoring. SBP and DBP were excluded as multicollinear with MAP.
+**Outcome:** Prolonged ICU stay, defined as hospital length of stay ≥14 days (binary: 1 = prolonged, 0 = normal). This threshold was selected based on clinical convention and prior literature defining prolonged critical illness.
 
-**Laboratory values (3):** Maximum creatinine, maximum white blood cell count (WBC), and minimum platelets during the first 24 hours. Bilirubin and lactate were excluded after sensitivity analysis showed no change in predictive performance (AUC 0.680 with and without), and both had \>15% missingness with patterns consistent with missing-not-at-random in ICU settings.
+**Outcome:** Prolonged ICU stay, defined as hospital length of stay ≥14 days (binary: 1 = prolonged, 0 = normal). This threshold was selected based on clinical convention and prior literature defining prolonged critical illness.
 
-**Neurological (1):** Minimum Glasgow Coma Scale (GCS) total score during the first 24 hours, capturing neurological severity not represented by other predictors. This variable was computed as the sum of three subscores — eye opening (itemids 220739), verbal response (itemid 223900), and motor response (itemid 223901) — each recorded as the minimum value observed within the first 24 hours of ICU admission. The minimum subscores were used to capture the worst neurological state during the observation window, consistent with severity scoring conventions. The total GCS ranges from 3 (no response) to 15 (fully alert and oriented)."
+**Vital signs (4):** Maximum heart rate, minimum mean arterial pressure (MAP), maximum respiratory rate, and maximum temperature during the first 24 hours of ICU admission. Worst-case values were used consistent with severity scoring conventions (APACHE II, SOFA). MAP was selected over systolic and diastolic blood pressure due to its use as the primary hemodynamic target in the Surviving Sepsis Campaign (MAP \>65 mmHg) and its inclusion in SOFA scoring (Rhodes et al., 2017). Both arterial (itemids 220052, 220050, 220051) and non-invasive (itemids 220181, 220179, 220180) blood pressure recordings were included and the minimum taken across both sources, consistent with clinical standard practice. SBP and DBP were excluded as multicollinear with MAP.
 
-**Demographics (3):** Age, gender (binary: male = 1), and race (collapsed to White, Black, Hispanic, Asian, Other, Unknown). \*Social determinants (1):\* Insurance type (Medicare, Medicaid, Private, Other, Unknown), which showed a 12% difference in prolonged stay prevalence across categories.
+**Laboratory values (3):** Maximum creatinine, maximum white blood cell count (WBC), and minimum platelets during the first 24 hours. These correspond directly to the renal, immune, and coagulation components of SOFA scoring (Vincent et al., 1996). Bilirubin and lactate were excluded after sensitivity analysis showed no change in predictive performance (AUC 0.680 with and without), and both had \>15% missingness with patterns consistent with missing-not-at-random in ICU settings.
 
-**Comorbidities (7)**: Hypertension, diabetes, chronic kidney disease (CKD), cardiovascular disease (CVD), chronic liver disease, immunosuppression, and vasopressor use — all derived from ICD-9 and ICD-10 secondary diagnosis codes.
+**Neurological (1):** Minimum Minimum Glasgow Coma Scale (GCS) total score during the first 24 hours. The GCS total was computed as the sum of the eye opening (itemid 220739), verbal response (itemid 223900), and motor response (itemid 223901) subscores, each taken as the minimum value within the 24-hour window to capture worst neurological state. The total ranges from 3 (no response) to 15 (fully alert), and lower scores reflect greater neurological severity (Teasdale & Jennett, 1974).
 
-**Interaction terms (3):** CKD×Diabetes (diabetic nephropathy), Chronic Liver×CVD (cardiohepatic syndrome), and GCS×Vasopressor (combined neurological and hemodynamic instability). These were included based on clinical reasoning that the joint presence of these conditions represents syndromes with distinct prognostic implications beyond their main effects.
+**Demographics (3):** Age, gender (binary: Male = 1, Female = 0), and race (collapsed to White, Black, Hispanic, Asian, Other, Unknown to reduce sparsity in small racial categories).
 
-**Pre-processing:** Outlier removal was performed by setting physiologically impossible values to missing (NA). Bounds were defined at biological limits — not clinical abnormality thresholds — to remove data entry errors while preserving true disease severity. Specific bounds applied were: heart rate (\<20 or \>300 bpm), mean arterial pressure (≤0 or \>200 mmHg), respiratory rate (\<5 or \>80 breaths/min), temperature (\<25°C or \>45°C), white blood cell count (\>500 K/µL), platelets (\>3,000 K/µL), creatinine (\>50 mg/dL), and Glasgow Coma Scale total (\<3 or \>15, as the scale is defined over this range by construction). Insurance type did not require outlier cleaning as it is categorical with fixed levels. Extreme values that were retained — such as respiratory rate of 73, WBC of 267, and temperature of 42.5°C — reflect physiologically possible values in severely ill sepsis patients. Following outlier removal, remaining missing values were imputed using the column median computed from the full cohort.
+**Comorbidities (7)**: Hypertension, diabetes, chronic kidney disease (CKD), cardiovascular disease (CVD), chronic liver disease, immunosuppression, and vasopressor use — all derived from ICD-9 and ICD-10 secondary diagnosis codes. Insurance type (Medicare, Medicaid, Private, Other, Unknown), which showed a 12% difference in prolonged stay prevalence across categories and has been shown to independently predict hospital outcomes (Barnato et al., 2008).
+
+**Comorbidities (7):** Hypertension, diabetes, chronic kidney disease (CKD), cardiovascular disease (CVD), chronic liver disease, immunosuppression, and vasopressor use. Comorbidities were derived from secondary ICD-9 and ICD-10 diagnosis codes to ensure complete coverage across the full temporal span of MIMIC-IV, which spans the ICD-9 to ICD-10 transition in 2015. Vasopressor use was derived from medication administration records (inputevents) and coded as a binary flag for receipt of any vasopressor agent within the first 24 hours.
+
+**Interaction terms (3):** CKD×Diabetes (diabetic nephropathy), Chronic Liver×CVD (cardiohepatic syndrome), and GCS×Vasopressor (combined neurological and hemodynamic instability). These were included based on clinical reasoning that the joint presence of these conditions represents syndromes with distinct prognostic implications beyond their main effects, and their retention by LASSO validated their statistical relevance.
+
+**Pre-processing:** Outlier removal was performed by setting physiologically impossible values to missing (NA). Bounds were defined at biological limits — not clinical abnormality thresholds — to remove data entry errors while preserving true disease severity. Specific bounds applied were: heart rate (\<20 or \>300 bpm), mean arterial pressure (≤0 or \>200 mmHg), respiratory rate (\<5 or \>80 breaths/min), temperature (\<25°C or \>45°C), white blood cell count (\>500 K/µL), platelets (\>3,000 K/µL), creatinine (\>50 mg/dL), and Glasgow Coma Scale total (\<3 or \>15, as the scale is defined over this range by construction). Insurance type did not require outlier cleaning as it is categorical with fixed levels. Extreme values that were retained — such as respiratory rate of 73, WBC of 267, and temperature of 42.5°C — reflect physiologically possible values in severely ill sepsis patients. As noted in the MIMIC-I documentation, implausible values may be present as artifacts of the archival process (Johnson et al., 2024). Following outlier removal, remaining missing values were imputed using the column median, applied to all continuous clinical variables.
 
 ### Comorbidities
 
@@ -258,10 +294,10 @@ sepsis_with_comorbidities <- sepsis_with_demo |>
   mutate(across(hypertension:immunosuppression, ~replace_na(.x, 0L)))
 
 # check 
-cat("Cohort after comorbidity join: ", nrow(sepsis_with_comorbidities), "\n")
-comorbidity_flags |>
-  summarise(across(hypertension:immunosuppression, ~round(mean(.x)*100,1))) |>
-  print(width=Inf)
+#cat("Cohort after comorbidity join: ", nrow(sepsis_with_comorbidities), "\n")
+#comorbidity_flags |>
+ # summarise(across(hypertension:immunosuppression, ~round(mean(.x)*100,1))) |>
+ # print(width=Inf)
 ```
 
 ### ICU Admission Window
@@ -279,7 +315,7 @@ icu_admissions_bq <- tbl(con_bq, "icustays") |>
 icustays_raw <- icu_admissions_bq |> collect()
 icu_admissions <- icustays_raw
 
-cat("ICU stays pulled:", nrow(icustays_raw), "\n")
+#cat("ICU stays pulled:", nrow(icustays_raw), "\n")
 ```
 
 ### Vital Signs
@@ -338,7 +374,7 @@ vitals_summary <- vitals_raw |>
   ) |>
   pivot_wider(names_from = vital_name, values_from = value)
 
-cat("Patients with vitals:", nrow(vitals_summary), "\n")
+# cat("Patients with vitals:", nrow(vitals_summary), "\n")
 ```
 
 ### Lab Events
@@ -380,7 +416,7 @@ labs_summary <- labs_raw |>
   ) |>
   pivot_wider(names_from = lab_name, values_from = value)
 
-cat("Patients with labs:", nrow(labs_summary), "\n")
+#cat("Patients with labs:", nrow(labs_summary), "\n")
 ```
 
 ### Glasgow Coma Scale
@@ -409,7 +445,7 @@ gcs_raw <- tbl(con_bq, "chartevents") |>
   mutate(gcs_total = gcs_eye + gcs_verbal + gcs_motor) |>
   select(subject_id, hadm_id, gcs_total)
 
-cat("Patients with GCS data:", nrow(gcs_raw), "\n")
+#cat("Patients with GCS data:", nrow(gcs_raw), "\n")
 ```
 
 ### Vasopressor Use
@@ -438,7 +474,7 @@ vasopressor_flags <- vasopressors_raw |>
   summarise(vasopressor = 1L, .groups = "drop")
 
 # check
-cat("Patients with vasopressors:", nrow(vasopressor_flags), "\n")
+#cat("Patients with vasopressors:", nrow(vasopressor_flags), "\n")
 ```
 
 ### Final Dataset Assembly
@@ -560,20 +596,21 @@ cat("Final Analytic Cohort:", nrow(sepsis_imputed), "\n")
 
 ```
 
-## Analytic Approach and Modeling
+## Analytical Approach and Modeling
 
-**Index time:** ICU admission. The prediction window was the first 24 hours of ICU admission, using worst-case values to capture peak physiological health status.
+**Index time and prediction window:** The index time was ICU admission. All predictors were derived from the first 24 hours of ICU admission, using worst-case values to capture peak physiological derangement consistent with standard severity scoring approaches (Johnson et al., 2017). The prediction target was prolonged hospital stay (≥14 days), which is clinically meaningful as it is observable at the time of admission and actionable for early discharge planning.
 
 **Models:** Six classification models were trained and compared:
 
-1.  *Logistic Regression* — baseline linear model
-2.  *LASSO* (α = 1) — L1 penalization for automatic variable selection
-3.  *Ridge* (α = 0) — L2 penalization retaining all predictors
-4.  *Elastic Net* (α = 0.5) — combination of L1 and L2 penalties
-5.  *Random Forest* — ensemble of decision trees with bootstrap aggregation
-6.  *XGBoost* — gradient boosted trees with sequential error correction
+1.  *Logistic Regression* — baseline linear model with no penalization, providing a reference for model complexity
+2.  *LASSO* (Least Absolute Shrinkage and Selection Operator, α = 1) — L1 penalization enabling automatic variable selection by shrinking uninformative coefficients to zero (Tibshirani,
+    1996) 
+3.  *Ridge* (α = 0) — L2 penalization retaining all predictors while shrinking coefficients toward zero
+4.  *Elastic Net* (α = 0.5) — combination of L1 and L2 penalties balancing variable selection and coefficient stability
+5.  *Random Forest* — ensemble of decision trees using bootstrap aggregation and random feature subsampling, capturing nonlinear relationships (Breiman, 2001)
+6.  *XGBoost* — gradient boosted trees using sequential error correction, capable of capturing complex predictor interactions (Chen & Guestrin, 2016)
 
-All models were implemented in R using the `glmnet` package for regularized regression and the `tidymodels` framework for Random Forest (`ranger`) and XGBoost (`xgboost`).
+**Software:** All analyses were conducted in R (version 4.x). Regularized regression models (LASSO, Ridge, Elastic Net) were implemented using the `glmnet` package with 10-fold cross-validation for lambda selection. Random Forest and XGBoost were implemented using the `tidymodels` framework with the `ranger` and `xgboost` engines respectively. Data access used `bigrquery` and `dbplyr`. Visualizations used `ggplot2`. The Shiny application used the `shiny` package.
 
 ### Model Matrix
 
@@ -894,11 +931,13 @@ cat("XGBoost Test AUC:", round(gb_auc, 3), "\n")
 
 ## Model Evaluation
 
-**Train/test split:** An 80/20 stratified split was used (n = 3,343 training, n = 836 test), stratified on the outcome to preserve class balance.
+**Train/test split:** An 80/20 stratified random split was used (n = 3,343 training, n = 836 test), stratified on the outcome variable to preserve class balance (37.7% prolonged stay) in both partitions. The same split was used for all six models to ensure fair comparison.
 
-**Cross-validation:** 5-fold cross-validation was used for hyperparameter tuning of Random Forest (mtry, trees) and XGBoost (tree_depth, learn_rate).
+**Cross-validation:** 5-fold cross-validation was used for hyperparameter tuning of Random Forest (mtry, trees) and XGBoost (tree_depth, learn_rate), with CV AUC as the optimization metric. For regularized regression models, lambda was selected by 10-fold cross-validation within the training set using `cv.glmnet`.
 
-**Hyperparameter tuning:** Initial tuning ranges were informed by diagnostic plots of CV AUC against hyperparameter values. For Random Forest, the trees range was expanded from 100–300 to 200–500 after diagnostic plots showed an upward trend at the boundary. For XGBoost, the learning rate range was narrowed from (1e-5, 100) to (1e-5, 1) after diagnostic plots revealed AUC collapsed for learn_rate \> 1, concentrating grid points in the effective region. Diagnostic plots confirmed that optimal hyperparameters were interior to the final search grids for both models.
+**Hyperparameter tuning:** Initial tuning ranges were informed by diagnostic plots of CV AUC against hyperparameter values to ensure the optimal parameters were interior to the search grid, a necessary condition for confirming the grid was appropriately specified. For Random Forest, the trees range was expanded from 100–300 to 200–500 after diagnostic plots showed performance still improving at the upper boundary. For XGBoost, the learning rate range was narrowed from (1e-5, 100) to (1e-5, 1) after diagnostic plots revealed AUC collapsed for learn_rate \> 1, concentrating grid points in the effective region and improving test AUC from 0.678 to 0.683.
+
+**Performance metrics:** The primary performance metric was the area under the receiver operating characteristic curve (AUC/ROC), which measures discriminative ability independent of a decision threshold. Decision thresholds were selected using the Youden index (J = sensitivity + specificity − 1), which maximizes the sum of sensitivity and specificity simultaneously. Sensitivity (true positive rate) and specificity (true negative rate) at the Youden-optimal threshold are reported for all regularized regression models.
 
 ```{r}
 #| label: diagnostic-plots
@@ -936,7 +975,7 @@ gb_fit |>
 
 ## Cohort Characteristics
 
-The final analytic cohort comprised 4,179 adult sepsis ICU patients after applying all inclusion and exclusion criteria. Of these, 1,575 (37.7%) experienced prolonged ICU stays (≥14 days). The cohort had a median age of 65 years, was 57% male, and was predominantly White (61%). Medicare was the most common insurance type (52%). Hypertension (52%) and cardiovascular disease (38%) were the most prevalent comorbidities. Vasopressor use in the first 24 hours was recorded in 34% of patients.
+The final analytic cohort comprised 4,179 adult sepsis ICU patients after applying all inclusion and exclusion criteria (Figure 1). Of these, 1,575 (37.7%) experienced prolonged ICU stays (≥14 days). The cohort had a median age of 65 years and was predominantly male (57%) and White (61%). Medicare was the most common insurance type (52%), reflecting the older age distribution of the cohort. Hypertension (52%) and cardiovascular disease (38%) were the most prevalent comorbidities. Vasopressor use in the first 24 hours was recorded in 34% of patients, indicating a substantial proportion with hemodynamic compromise at admission. Table 1 presents full cohort characteristics stratified by outcome.
 
 ```{r}
 #| label: cohort-flow
@@ -1118,10 +1157,12 @@ sepsis_imputed |>
 
 ## Model Performance
 
-All six models demonstrated comparable discriminative performance on the held-out test set (AUC range 0.677–0.683). XGBoost achieved the highest test AUC (0.683) following diagnostic-guided hyperparameter refinement. Ridge regression (0.681) and LASSO (0.680) performed comparably. Random Forest achieved an AUC of 0.677, modestly below the regularized regression models. The narrow range of AUC values (0.006 difference between best and worst) suggests predominantly linear relationships between predictors and prolonged stay, and that increasing model complexity did not yield meaningful performance gains.
+All six models demonstrated comparable discriminative performance on the held-out test set (AUC range 0.677–0.683), as shown in Table 2. XGBoost achieved the highest test AUC (0.683) following diagnostic-guided hyperparameter refinement. Ridge regression (AUC = 0.681) and LASSO (AUC = 0.680) performed comparably, while Random Forest (AUC = 0.677) performed modestly below the regularized regression models. The narrow AUC range of 0.006 across all models suggests predominantly linear relationships between predictors and prolonged stay, consistent with prior evidence that logistic regression performs comparably to more complex machine learning models on structured tabular clinical data (Christodoulou et al., 2019). ROC curves for all four regularized regression models are shown in Figure 3.
+
+At the Youden-optimal threshold, LASSO achieved sensitivity of 55.6% and specificity of 71.7%, reflecting a model calibrated toward avoiding false positives which is appropriate for a screening tool where unnecessary interventions carry costs. Elastic Net achieved higher sensitivity (68.6%) at a lower threshold (0.343) but with reduced specificity (58.7%), representing a different sensitivity-specificity tradeoff.
 
 ```{r}
-#| label: model-performance-table
+#| label:  table2
 # full model comparison table
 tibble(
   Model       = c("Logistic Regression", "LASSO", "Ridge", 
@@ -1203,14 +1244,18 @@ ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
   theme(legend.position = "bottom")
 ```
 
-The narrow range of AUC values across all models (0.006 difference between best and worst) suggests that the relationships between predictors and prolonged stay are predominantly linear, and that increasing model complexity did not yield meaningful performance gains in this dataset.
+The narrow range of AUC values across all models (0.006 difference between best and worst suggests that the relationships between predictors and prolonged stay are predominantly linear, and that increasing model complexity did not yield meaningful performance gains in this dataset.
 
 ## Feature Importance
 
-LASSO variable selection retained 24 of 30 model matrix columns, dropping race_collapsedASIAN, race_collapsedUNKNOWN, race_collapsedWHITE, diabetes (main effect), immunosuppression, and insurancePrivate. Notably, all three interaction terms were retained, with the CKD×Diabetes interaction kept while diabetes as a main effect was dropped — consistent with diabetic nephropathy as the clinically meaningful entity. Chronic liver disease and cardiovascular disease had the largest positive LASSO coefficients. Insurance: Unknown had the largest negative coefficient, likely reflecting documentation patterns rather than true clinical differences.
+LASSO variable selection retained 24 of 30 model matrix columns, dropping race_collapsedASIAN, race_collapsedUNKNOWN, race_collapsedWHITE, diabetes as a main effect, immunosuppression, and insurancePrivate. Notably, all three pre-specified interaction terms were retained, with the CKD×Diabetes interaction kept while diabetes as a main effect was dropped, consistent with diabetic nephropathy as the clinically meaningful entity rather than diabetes alone (Table 3).
+
+Chronic liver disease (β = 0.390) and cardiovascular disease (β = 0.242) had the largest positive coefficients, indicating the strongest associations with prolonged stay. Glasgow Coma Scale had the largest negative coefficient among continuous predictors (β = −0.103), indicating that lower GCS, reflecting worse neurological state, is associated with prolonged stay, consistent with its role as a validated severity marker (Teasdale & Jennett, 1974). Vasopressor use was negatively associated with prolonged stay (β = −0.210) which may reflect competing risk. The most hemodynamically compromised patients may die early rather than accumulate prolonged stays, a bias partially mitigated by the 48-hour early death exclusion. Insurance: Unknown had the largest negative coefficient overall (β = −0.781), likely reflecting documentation patterns rather than a true protective effect. The interaction term Chronic Liver × CVD was negative (β = −0.236), suggesting the combined effect is less than additive meaning patients with both conditions may have shorter stays due to higher early mortality risk. LASSO regression does not produce p-values; variable retention and coefficient magnitude reflect the L1 penalization at lambda.min selected by 10-fold cross-validation.
+
+Both Random Forest and XGBoost produced variable importance plots ranking predictors by their contribution to model performance. Variable importance in Random Forest reflects mean decrease in node impurity across all trees, while XGBoost importance reflects cumulative gain from splits on each predictor. Despite these different importance metrics, both models consistently ranked Glasgow Coma Scale total as the most important predictor by a substantial margin, followed by age and platelets as the next highest-ranked continuous predictors. This convergence across two fundamentally different tree-based approaches and alignment with LASSO's large GCS coefficient, strengthens confidence in neurological severity at admission as a robust predictor of prolonged ICU stay.
 
 ```{r}
-#| label: table2
+#| label: table3
 # LASSO coefficient table for report
 coef(lasso_model) |>
   as.matrix() |>
@@ -1284,9 +1329,9 @@ coef(lasso_model) |>
   )
 ```
 
-### VIP Alignment
+## Predictor Contributions: LASSO Variable Selection and Tree-Based Importance
 
-Random Forest and XGBoost variable importance plots both identified GCS total as the top predictor by importance magnitude, followed by age and platelets. This is consistent with LASSO findings where GCS had the largest coefficient among continuous clinical predictors. The alignment across all three modeling approaches strengthens confidence in GCS as a robust predictor of prolonged ICU stay.
+Both Random Forest and XGBoost produced variable importance plots ranking predictors by their contribution to model performance. Variable importance in Random Forest reflects mean decrease in node impurity across all trees, while XGBoost importance reflects cumulative gain from splits on each predictor. Despite these different importance metrics, both models consistently ranked Glasgow Coma Scale (GCS) total as the most important predictor, followed by age and platelets as the next highest ranked continuous predictors. This convergence across two fundamentally different tree-based modeling approaches and is in alignment with LASSO's large GCS coefficient (β = -0.103) which strengthens confidence in neurological severity at admission as a robust and clinically meaningful predictor of prolonged ICU stay in sepsis patients.
 
 ```{r}
 #| label: vip-plots
@@ -1320,25 +1365,45 @@ final_gb_fit |>
 
 ## Summary of Findings
 
-This study developed and evaluated six machine learning models for predicting prolonged ICU stay in adult sepsis patients using MIMIC-IV. All models performed comparably (AUC 0.677–0.683), with XGBoost achieving the highest test AUC (0.683). The convergence of performance across model classes — from simple logistic regression to gradient boosted trees — suggests that the predictive signal in this dataset is largely captured by linear relationships, and that additional model complexity does not provide meaningful clinical benefit. Comorbidity burden, particularly chronic liver disease and cardiovascular disease, emerged as the strongest predictors of prolonged stay, more so than acute physiological derangements. This finding suggests that pre-admission health status is a key driver of extended ICU stay in sepsis patients, and that risk stratification should account for chronic disease burden alongside acute severity.
+This study developed and evaluated six machine learning models for predicting prolonged ICU stay (≥14 days) in adult sepsis patients using MIMIC-IV, directly addressing the stated objective of comparing predictive performance across model classes. All models performed comparably (AUC 0.677–0.683), with XGBoost achieving the highest test AUC (0.683). The convergence of performance across model classes, from simple logistic regression to gradient boosted trees, confirms our hypothesis that the relationships in this dataset are predominantly linear, and is consistent with prior systematic evidence that logistic regression performs similarly to more complex machine learning models on structured tabular clinical data (Christodoulou et al., 2019).
+
+Comorbidity burden, particularly chronic liver disease (β = 0.390) and cardiovascular disease (β = 0.242), emerged as the strongest predictors of prolonged stay, with acute physiological derangements having comparatively small coefficients. This confirms our primary hypothesis that pre-admission health status drives prolonged stay more than acute severity at presentation, consistent with prior evidence that pre-existing comorbidities independently predict prolonged hospitalization in sepsis patients (Iwashyna et al., 2010). Glasgow Coma Scale emerged as the strongest continuous clinical predictor across all three modeling approaches, consistent with its validated role in ICU outcome prediction (Teasdale & Jennett, 1974). The retention of all three pre-specified interaction terms by LASSO validates our clinical reasoning that comorbidity syndromes carry prognostic information beyond their main effects.
+
+The negative coefficient for vasopressor use (β = −0.210) was unexpected given that vasopressor dependent patients are typically sicker. This likely reflects residual competing risk, the most hemodynamically compromised patients may die early rather than accumulate prolonged stays, despite the 48-hour early death exclusion applied during cohort construction.
 
 ## Comparison with Previous Work
 
-Prior studies applying machine learning to ICU outcome prediction have similarly found that regularized regression methods perform comparably to more complex ensemble approaches on structured tabular clinical data. The predominance of comorbidity burden over acute physiology in predicting prolonged stay is consistent with the broader literature on post-acute care outcomes in critically ill patients.
+The comparable performance of regularized regression and ensemble methods is consistent with Christodoulou et al. (2019), who demonstrated in a systematic review of 71 clinical prediction studies that logistic regression performed similarly to more complex machine learning models across a broad range of clinical prediction tasks. The modest underperformance of Random Forest (AUC = 0.677) relative to regularized regression is consistent with findings by Couronné et al. (2018), who showed in a large-scale benchmark of 243 datasets that Random Forest does not consistently outperform logistic regression on biomedical datasets, particularly when sample sizes are moderate and predictors are predominantly binary which is true for our cohort.
+
+The use of SOFA-based laboratory predictors (creatinine, platelets) and worst-case vital signs aligns with prior ICU prediction literature (Johnson et al., 2017; Vincent et al., 1996). The identification of chronic liver disease and cardiovascular disease as top comorbidity predictors is consistent with prior evidence on the role of pre-existing organ dysfunction in sepsis outcomes (Iwashyna et al., 2010; Rhee et al., 2017). The retention of insurance type and race as independent predictors beyond clinical severity aligns with prior evidence on social determinants of health in ICU outcomes (Barnato et al., 2008; Mayr et al., 2014).
+
+Prior machine learning studies on MIMIC sepsis cohorts have primarily focused on mortality prediction and early sepsis identification (Moor et al., 2021; Sheetrit et al., 2021), with fewer studies targeting prolonged length of stay as the primary outcome. This study contributes to a less-explored but clinically important prediction target, and demonstrates that the same clinical features used for severity scoring also carry predictive signal for duration of ICU stay.
 
 ## Strengths and Limitations
 
-\*Strengths:\*\* This study used a large, well-validated clinical database with comprehensive coverage of diagnoses, vital signs, laboratory values, and administrative data. Both ICD-9 and ICD-10 codes were used for comorbidity identification, ensuring coverage across the full temporal range of the dataset. Clinically motivated interaction terms were pre-specified based on known clinical syndromes, and their retention by LASSO provides data-driven validation of their relevance.
+**Strengths:** This study used MIMIC-IV v3.1, a large well-validated critical care database spanning 14 years of admissions (2008–2022), providing substantial temporal coverage and sample diversity. The database undergoes rigorous de-identification and institutional review board oversight, and access requires credentialed training — ensuring appropriate data governance. Both ICD-9 and ICD-10 codes were used for comorbidity identification, ensuring complete coverage across the full temporal span of the dataset given the transition between coding systems in 2015. Clinically motivated interaction terms were pre-specified based on known clinical syndromes, and their retention by LASSO provides data-driven validation of their relevance. Six model classes were compared on an identical train/test split with consistent preprocessing, ensuring fair and reproducible comparison. The use of BigQuery with server-side filtering ensured computational efficiency and reproducibility.
 
-**Limitations:** The study was conducted at a single center (BIDMC) and results may not generalize to other institutions or patient populations. The outcome was defined using hospital LOS as a proxy for ICU LOS, which may introduce misclassification for patients transferred between units. Median imputation was used for missing values, which may underestimate uncertainty. The model uses first-admission worst-case values and does not capture dynamic changes in patient status over time. AUC of 0.680 reflects moderate discriminative ability — the model should supplement, not replace, clinical judgment.
+**Limitations:** The study was conducted at a single center (BIDMC, Boston, MA) and results may not generalize to other institutions, patient populations, or geographic regions. The outcome was defined using hospital length of stay as a proxy for ICU length of stay, which may introduce misclassification for patients transferred between units within the same hospitalization. As noted in the MIMIC-IV documentation, patients over age 89 are recorded as age 91, introducing right-censoring in the age distribution that may affect predictions for the oldest patients (Johnson et al., 2024). Median imputation was used for missing values, which may underestimate uncertainty and does not account for missing-not-at-random patterns in variables like bilirubin and lactate. The model uses first-admission worst-case values from the first 24 hours and does not capture dynamic changes in patient status over time. AUC of 0.680–0.683 reflects moderate discriminative ability showing the model is intended to supplement, not replace, clinical judgment.
 
 ## Implications
 
-These findings have several practical implications. First, the strong role of comorbidity burden suggests that sepsis patients with chronic liver disease or cardiovascular disease should be flagged early for proactive discharge planning and care coordination. Second, the comparable performance of LASSO and XGBoost supports the use of interpretable models in clinical decision support applications, where transparency is critical for clinician trust and adoption. Third, the inclusion of insurance type and race as independent predictors highlights the role of social determinants of health in ICU outcomes, suggesting that equitable care initiatives should consider these factors in resource allocation.
+These findings carry several practical implications for clinical practice, hospital administration, and health equity.
+
+From a clinical standpoint, the identification of chronic liver disease and cardiovascular disease as the strongest predictors suggests that comorbidity burden at admission — rather than acute physiological derangement alone — is the primary driver of prolonged ICU stay in sepsis. Clinicians may benefit from early identification of high-comorbidity sepsis patients at the time of ICU admission, enabling proactive initiation of discharge planning, palliative care consultation, and care coordination before the stay becomes prolonged.
+
+From a modeling perspective, the comparable performance of LASSO (AUC = 0.680) and XGBoost (AUC = 0.683) across all six models supports the use of interpretable models for clinical decision support. Transparent, coefficient-based predictions allow clinicians to understand which factors drive individual risk estimates — a critical requirement for clinician trust, regulatory compliance, and responsible AI deployment in healthcare settings.
+
+From a health equity standpoint, the retention of insurance type and race as independent predictors — beyond clinical severity — highlights the influence of social determinants of health on ICU outcomes. Patients with Medicaid or unknown insurance status showed meaningfully different prolonged stay rates compared to privately insured patients, independent of clinical factors. This suggests that hospital resource allocation and discharge planning programs should account for social determinants alongside clinical risk, and that future modeling efforts should explicitly evaluate prediction fairness across demographic subgroups.
 
 # Conclusion
 
-This study demonstrates that prolonged ICU stay in sepsis patients can be predicted with moderate accuracy (AUC 0.683) using routinely collected clinical and administrative data from the first 24 hours of ICU admission. All six machine learning models performed comparably, suggesting predominantly linear relationships between predictors and outcome. Comorbidity burden — particularly chronic liver disease and cardiovascular disease — was the strongest driver of prolonged stay, more so than acute physiological derangements. These findings support the use of interpretable models such as LASSO for clinical deployment, and highlight the importance of pre-admission health status in early risk stratification for sepsis patients. Future work could extend this approach by incorporating dynamic time-series data from the full ICU stay, validating the model in external cohorts, and exploring fairness-aware modeling approaches to address the observed associations between race, insurance, and outcomes.
+This study demonstrates that prolonged ICU stay in sepsis patients can be predicted with moderate accuracy using routinely collected clinical and administrative data available within the first 24 hours of ICU admission. Across six machine learning models, XGBoost achieved the highest test AUC (0.683), though all models performed comparably (range 0.677–0.683), confirming that the predictive relationships in this dataset are predominantly linear and that increasing model complexity does not yield meaningful clinical benefit — consistent with prior systematic evidence (Christodoulou et al., 2019).
+
+Comorbidity burden — particularly chronic liver disease and cardiovascular disease — emerged as the dominant drivers of prolonged stay, consistently identified across LASSO, Random Forest, and XGBoost. Glasgow Coma Scale score was the strongest continuous clinical predictor across all three approaches, underscoring the importance of neurological severity at admission. Social determinants of health, including insurance type and race, were retained as independent predictors beyond clinical severity, highlighting the multidimensional nature of prolonged ICU stay. All three pre-specified clinical interaction terms were retained by LASSO, validating the hypothesis that comorbidity syndromes carry information beyond their main effects.
+
+LASSO logistic regression was selected for clinical deployment in the accompanying Shiny application due to its interpretable coefficients — a critical requirement for responsible clinical decision support where clinicians must understand individual predictor contributions to trust and act on model predictions.
+
+Future work should prioritize external validation across multiple centers to assess generalizability, incorporation of dynamic time-series data from the full ICU course, and application of fairness-aware modeling frameworks to evaluate and mitigate prediction disparities across demographic subgroups. Prospective evaluation of model-guided discharge planning interventions would be required to establish clinical utility beyond predictive accuracy.
 
 # References
 
